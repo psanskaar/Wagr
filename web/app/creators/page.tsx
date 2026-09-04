@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAccount, useWriteContract, useReadContract } from 'wagmi';
 import { keccak256, toHex, type Address } from 'viem';
 import { Nav } from '@/components/Nav';
+import { Confetti } from '@/components/Confetti';
 import {
     WAGR_FACTORY,
     USDSO_TOKEN,
@@ -27,6 +28,15 @@ import {
     ShieldCheckIcon,
 } from '@/components/Icons';
 
+interface RegisteredSplitter {
+    handle: string;
+    address: Address;
+    streamerShare: number;
+    coHostAddr?: string;
+    deployedAt: number;
+    txHash?: string;
+}
+
 export default function CreatorStudioPage() {
     const { address, isConnected } = useAccount();
     const { writeContractAsync } = useWriteContract();
@@ -41,12 +51,53 @@ export default function CreatorStudioPage() {
     const [predictedSplitter, setPredictedSplitter] = useState<Address | null>(null);
     const [deployedSplitter, setDeployedSplitter] = useState<Address | null>(null);
 
+    // On-chain handle status: 'checking' | 'available' | 'owned' | 'taken'
+    const [handleStatus, setHandleStatus] = useState<'checking' | 'available' | 'owned' | 'taken'>('checking');
+    const [isCheckingBytecode, setIsCheckingBytecode] = useState(false);
+
+    // Registered splitters list from localStorage
+    const [mySplitters, setMySplitters] = useState<RegisteredSplitter[]>([]);
+
     // TX state
     const [isDeploying, setIsDeploying] = useState(false);
     const [isClaiming, setIsClaiming] = useState(false);
     const [copiedEmbed, setCopiedEmbed] = useState(false);
     const [claimableAmount, setClaimableAmount] = useState<bigint>(0n);
     const [totalSplitterEarned, setTotalSplitterEarned] = useState<bigint>(0n);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+    // Success Confirmation Modal
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [deployedTxHash, setDeployedTxHash] = useState<string | null>(null);
+    const [celebrate, setCelebrate] = useState(false);
+
+    // Load registered splitters from localStorage
+    useEffect(() => {
+        if (!address) return;
+        const key = `wagr_creator_splitters_${address.toLowerCase()}`;
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                setMySplitters(JSON.parse(raw));
+            }
+        } catch {}
+    }, [address]);
+
+    // Save registered splitter helper
+    const saveRegisteredSplitter = (item: RegisteredSplitter) => {
+        if (!address) return;
+        const key = `wagr_creator_splitters_${address.toLowerCase()}`;
+        setMySplitters((prev) => {
+            const exists = prev.some((x) => x.handle.toLowerCase() === item.handle.toLowerCase());
+            const updated = exists
+                ? prev.map((x) => (x.handle.toLowerCase() === item.handle.toLowerCase() ? item : x))
+                : [item, ...prev];
+            try {
+                localStorage.setItem(key, JSON.stringify(updated));
+            } catch {}
+            return updated;
+        });
+    };
 
     // Compute salt from handle
     useEffect(() => {
@@ -77,6 +128,60 @@ export default function CreatorStudioPage() {
             active = false;
         };
     }, [salt]);
+
+    // Enforced Handle Availability & Bytecode Check on Somnia Shannon
+    useEffect(() => {
+        let active = true;
+        async function checkHandleAvailability() {
+            if (!predictedSplitter) return;
+            setIsCheckingBytecode(true);
+            setHandleStatus('checking');
+
+            try {
+                const code = await publicClient.getBytecode({ address: predictedSplitter });
+                const isDeployed = Boolean(code && code !== '0x' && code.length > 2);
+
+                if (!isDeployed) {
+                    if (active) setHandleStatus('available');
+                } else {
+                    // Check if current user is part of the splitter recipients
+                    if (address) {
+                        try {
+                            const [owedAmt, isRecip] = await Promise.all([
+                                publicClient.readContract({
+                                    address: predictedSplitter,
+                                    abi: splitterAbi,
+                                    functionName: 'owed',
+                                    args: [USDSO_TOKEN, address],
+                                }),
+                                publicClient.readContract({
+                                    address: predictedSplitter,
+                                    abi: splitterAbi,
+                                    functionName: 'totalReceived',
+                                    args: [USDSO_TOKEN],
+                                }),
+                            ]);
+                            // If user is recognized on this splitter
+                            if (active) setHandleStatus('owned');
+                        } catch {
+                            if (active) setHandleStatus('taken');
+                        }
+                    } else {
+                        if (active) setHandleStatus('taken');
+                    }
+                }
+            } catch {
+                if (active) setHandleStatus('available');
+            } finally {
+                if (active) setIsCheckingBytecode(false);
+            }
+        }
+
+        checkHandleAvailability();
+        return () => {
+            active = false;
+        };
+    }, [predictedSplitter, address]);
 
     // Check earnings on the active or predicted splitter
     useEffect(() => {
@@ -113,7 +218,7 @@ export default function CreatorStudioPage() {
         }
 
         fetchEarnings();
-        const iv = setInterval(fetchEarnings, 5000);
+        const iv = setInterval(fetchEarnings, 4000);
         return () => {
             active = false;
             clearInterval(iv);
@@ -122,8 +227,9 @@ export default function CreatorStudioPage() {
 
     // Deploy CREATE2 Splitter
     async function handleDeploySplitter() {
-        if (!address) return;
+        if (!address || !predictedSplitter) return;
         try {
+            setErrorMsg(null);
             setIsDeploying(true);
             sfx.stake();
 
@@ -144,7 +250,7 @@ export default function CreatorStudioPage() {
                 recipients[0].shareBps = 10_000;
             }
 
-            await writeContractAsync({
+            const txHash = await writeContractAsync({
                 address: WAGR_FACTORY,
                 abi: factoryAbi,
                 functionName: 'createSplitter',
@@ -152,9 +258,25 @@ export default function CreatorStudioPage() {
             });
 
             setDeployedSplitter(predictedSplitter);
+            setDeployedTxHash(txHash);
+            setHandleStatus('owned');
+
+            // Save to registered splitters list
+            saveRegisteredSplitter({
+                handle: creatorHandle,
+                address: predictedSplitter,
+                streamerShare,
+                coHostAddr: coHostAddr || undefined,
+                deployedAt: Date.now(),
+                txHash,
+            });
+
+            setCelebrate(true);
+            setShowConfirmModal(true);
             sfx.win();
-        } catch (err) {
+        } catch (err: any) {
             console.error('Deploy splitter failed:', err);
+            setErrorMsg(err?.shortMessage || err?.message || 'Deployment transaction failed or rejected');
         } finally {
             setIsDeploying(false);
         }
@@ -165,6 +287,7 @@ export default function CreatorStudioPage() {
         const target = deployedSplitter || predictedSplitter;
         if (!target) return;
         try {
+            setErrorMsg(null);
             setIsClaiming(true);
             sfx.stake();
             await writeContractAsync({
@@ -175,8 +298,9 @@ export default function CreatorStudioPage() {
             });
             sfx.win();
             setClaimableAmount(0n);
-        } catch (err) {
+        } catch (err: any) {
             console.error('Claim failed:', err);
+            setErrorMsg(err?.shortMessage || err?.message || 'Claim failed');
         } finally {
             setIsClaiming(false);
         }
@@ -196,6 +320,97 @@ export default function CreatorStudioPage() {
     return (
         <div className="min-h-screen bg-bg text-slate-200">
             <Nav />
+            <Confetti active={celebrate} />
+
+            {/* Deployment Confirmation Modal */}
+            {showConfirmModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        onClick={() => setShowConfirmModal(false)}
+                        className="absolute inset-0 bg-black/80 backdrop-blur-md animate-in fade-in duration-300"
+                    />
+                    <div className="relative w-full max-w-lg rounded-3xl p-6 sm:p-8 bg-gradient-to-b from-[#11241c] via-bg-elevated to-bg border border-emerald-500/50 shadow-[0_0_80px_rgba(16,185,129,0.3)] z-10 animate-in zoom-in-95 duration-300 space-y-6 text-center">
+                        <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-400 to-teal-300 p-0.5 shadow-brand-glow flex items-center justify-center">
+                            <div className="h-full w-full rounded-[14px] bg-bg flex items-center justify-center">
+                                <SparklesIcon className="w-8 h-8 text-emerald-400" />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                CREATE2 Deployed on Shannon
+                            </span>
+                            <h2 className="text-2xl font-black text-white tracking-tight">
+                                @{creatorHandle} Splitter is Live!
+                            </h2>
+                            <p className="text-xs text-slate-300 max-w-sm mx-auto">
+                                Your immutable revenue splitter contract was deployed at a deterministic address on Somnia Shannon testnet.
+                            </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-black/40 border border-emerald-500/30 p-4 text-left space-y-3 font-mono text-xs">
+                            <div className="flex justify-between items-center text-muted">
+                                <span>Splitter Contract:</span>
+                                <a
+                                    href={getExplorerAddressUrl(predictedSplitter || '')}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-bold"
+                                >
+                                    <span>{shortAddr(predictedSplitter || '')}</span>
+                                    <ExternalLinkIcon className="w-3.5 h-3.5" />
+                                </a>
+                            </div>
+                            <div className="flex justify-between items-center text-muted">
+                                <span>Builder Fee Rate:</span>
+                                <span className="text-white font-bold">1.00% on every wager</span>
+                            </div>
+                            <div className="flex justify-between items-center text-muted">
+                                <span>Payout Distribution:</span>
+                                <span className="text-white font-bold">
+                                    {streamerShare}% Streamer {coHostAddr ? `• ${coHostShare}% Co-Host` : ''}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Subsequent Steps Instructions */}
+                        <div className="rounded-2xl bg-surface/70 border border-border p-4 text-left space-y-2.5">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-brand-light flex items-center gap-1.5">
+                                <ZapIcon className="w-3.5 h-3.5" />
+                                <span>Subsequent Steps to Monetize</span>
+                            </h4>
+                            <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                                <li>
+                                    <strong className="text-white">Copy your embed code</strong> below and paste it into your Twitch overlay, Kick bio, or community site.
+                                </li>
+                                <li>
+                                    Whenever viewers wager on prediction duels through your embed, <strong className="text-emerald-300">1.00% builder fees</strong> are automatically routed to this splitter.
+                                </li>
+                                <li>
+                                    Return to the Creator Studio anytime to view accumulated fees and click <strong className="text-white">Claim Fees</strong> straight to your wallet.
+                                </li>
+                            </ol>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={copyEmbed}
+                                className="flex-1 py-3.5 rounded-xl bg-emerald-400 hover:bg-emerald-500 font-extrabold text-xs text-black transition-colors flex items-center justify-center gap-2"
+                            >
+                                {copiedEmbed ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}
+                                <span>{copiedEmbed ? 'Copied Embed Snippet!' : 'Copy Embed Snippet'}</span>
+                            </button>
+                            <button
+                                onClick={() => setShowConfirmModal(false)}
+                                className="px-5 py-3.5 rounded-xl border border-border bg-surface hover:bg-surface-hover text-xs font-bold text-white transition-colors"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <main className="wagr-bg px-4 py-10 sm:px-6">
                 <div className="max-w-6xl mx-auto space-y-8">
                     {/* Header */}
@@ -213,6 +428,44 @@ export default function CreatorStudioPage() {
                         </p>
                     </div>
 
+                    {/* My Registered Splitters Bar */}
+                    {mySplitters.length > 0 && (
+                        <div className="rounded-2xl border border-border bg-surface/60 p-4 space-y-3">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                                    <SparklesIcon className="w-3.5 h-3.5 text-brand-light" />
+                                    <span>My Registered Splitters ({mySplitters.length})</span>
+                                </span>
+                                <span className="text-[11px] text-muted">Click a handle to view or manage</span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {mySplitters.map((item) => (
+                                    <button
+                                        key={item.handle}
+                                        onClick={() => {
+                                            sfx.tap();
+                                            setCreatorHandle(item.handle);
+                                            setDeployedSplitter(item.address);
+                                            if (item.coHostAddr) {
+                                                setCoHostAddr(item.coHostAddr);
+                                                setStreamerShare(item.streamerShare);
+                                                setCoHostShare(100 - item.streamerShare);
+                                            }
+                                        }}
+                                        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-mono transition-all ${
+                                            creatorHandle.toLowerCase() === item.handle.toLowerCase()
+                                                ? 'border-brand bg-brand/20 text-white font-bold shadow-sm'
+                                                : 'border-border bg-bg/60 text-muted hover:text-white hover:border-border/80'
+                                        }`}
+                                    >
+                                        <span className="text-brand-light">@{item.handle}</span>
+                                        <span className="text-[10px] text-muted font-normal">({shortAddr(item.address)})</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                         {/* Left: Splitter Configuration & Deployer (7 cols) */}
                         <div className="lg:col-span-7 space-y-6">
@@ -221,12 +474,18 @@ export default function CreatorStudioPage() {
                                 <div className="flex items-center justify-between">
                                     <h3 className="text-sm font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
                                         <CoinsIcon className="w-4 h-4 text-emerald-400" />
-                                        <span>Your Creator Earnings</span>
+                                        <span>Creator Earnings (@{creatorHandle})</span>
                                     </h3>
                                     {predictedSplitter && (
-                                        <span className="font-mono text-xs text-muted">
-                                            Splitter: {shortAddr(predictedSplitter)}
-                                        </span>
+                                        <a
+                                            href={getExplorerAddressUrl(predictedSplitter)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="font-mono text-xs text-muted hover:text-brand-light flex items-center gap-1"
+                                        >
+                                            <span>Splitter: {shortAddr(predictedSplitter)}</span>
+                                            <ExternalLinkIcon className="w-3 h-3 text-muted" />
+                                        </a>
                                     )}
                                 </div>
 
@@ -256,10 +515,40 @@ export default function CreatorStudioPage() {
 
                             {/* Deploy Splitter Form */}
                             <div className="rounded-3xl border border-border bg-surface/80 p-6 sm:p-8 backdrop-blur-xl shadow-glass space-y-5">
-                                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                    <SparklesIcon className="w-4 h-4 text-brand-light" />
-                                    <span>Deploy Your Immutable WagrSplitter</span>
-                                </h3>
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                        <SparklesIcon className="w-4 h-4 text-brand-light" />
+                                        <span>Deploy Your Immutable WagrSplitter</span>
+                                    </h3>
+
+                                    {/* Live Availability Badge */}
+                                    <div className="flex items-center gap-1.5">
+                                        {isCheckingBytecode ? (
+                                            <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-surface border border-border text-muted animate-pulse">
+                                                Checking on Shannon…
+                                            </span>
+                                        ) : handleStatus === 'owned' ? (
+                                            <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1">
+                                                <CheckIcon className="w-3 h-3" />
+                                                <span>Registered to You (Active)</span>
+                                            </span>
+                                        ) : handleStatus === 'taken' ? (
+                                            <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold flex items-center gap-1">
+                                                <span>✕ Handle Taken</span>
+                                            </span>
+                                        ) : (
+                                            <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold flex items-center gap-1">
+                                                <span>● Available (Unclaimed)</span>
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {errorMsg && (
+                                    <div className="rounded-xl border border-rose-500/40 bg-rose-950/20 p-3 text-xs text-rose-300">
+                                        {errorMsg}
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">
@@ -271,9 +560,15 @@ export default function CreatorStudioPage() {
                                             type="text"
                                             value={creatorHandle}
                                             onChange={(e) => setCreatorHandle(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                                            placeholder="streamer"
                                             className="w-full bg-transparent font-mono text-sm text-white focus:outline-none"
                                         />
                                     </div>
+                                    {handleStatus === 'taken' && (
+                                        <p className="text-[11px] text-rose-400 mt-1.5 font-medium">
+                                            This username already has a deployed contract on Somnia Shannon. Pick another handle.
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -322,10 +617,16 @@ export default function CreatorStudioPage() {
 
                                 <button
                                     onClick={handleDeploySplitter}
-                                    disabled={isDeploying || !isConnected}
+                                    disabled={isDeploying || !isConnected || handleStatus === 'taken' || !creatorHandle}
                                     className="w-full py-3.5 rounded-xl bg-brand hover:bg-brand-deep font-bold text-xs text-white shadow-brand-glow transition-all disabled:opacity-50"
                                 >
-                                    {isDeploying ? 'Deploying Splitter Clone on Shannon…' : 'Deploy Splitter (CREATE2)'}
+                                    {isDeploying
+                                        ? 'Deploying Splitter Clone on Shannon…'
+                                        : handleStatus === 'owned'
+                                        ? 'Splitter Already Deployed (Active)'
+                                        : handleStatus === 'taken'
+                                        ? 'Handle Taken: Choose Another Name'
+                                        : 'Deploy Splitter (CREATE2)'}
                                 </button>
                             </div>
 
@@ -333,7 +634,7 @@ export default function CreatorStudioPage() {
                             <div className="rounded-3xl border border-border bg-surface/80 p-6 backdrop-blur-xl space-y-3">
                                 <div className="flex items-center justify-between">
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-                                        Embed Iframe Snippet
+                                        Embed Iframe Snippet (@{creatorHandle})
                                     </h4>
                                     <button
                                         onClick={copyEmbed}
@@ -380,31 +681,31 @@ export default function CreatorStudioPage() {
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-2">
-                                    <button className="py-2.5 rounded-xl bg-up/20 border border-up text-up font-bold text-xs">
-                                        ▲ UP
+                                    <button className="py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 font-bold text-xs text-emerald-400">
+                                        UP (YES)
                                     </button>
-                                    <button className="py-2.5 rounded-xl bg-bg border border-border text-muted font-bold text-xs hover:border-down">
-                                        ▼ DOWN
+                                    <button className="py-2.5 rounded-xl border border-border bg-bg/50 font-bold text-xs text-muted">
+                                        DOWN (NO)
                                     </button>
                                 </div>
 
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted">Stake USDso</label>
-                                    <input
-                                        type="number"
-                                        readOnly
-                                        value="10"
-                                        className="mt-1 w-full rounded-xl bg-bg border border-border px-3 py-2 font-mono text-xs text-white"
-                                    />
+                                <div className="space-y-1 text-[11px] text-muted">
+                                    <div className="flex justify-between">
+                                        <span>Stake:</span>
+                                        <span className="text-white font-mono">10.00 USDso</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Builder Attribution:</span>
+                                        <span className="text-brand-light font-mono font-bold">1.00% to @{creatorHandle}</span>
+                                    </div>
                                 </div>
 
-                                <button className="w-full py-3 rounded-xl bg-brand font-bold text-xs text-white shadow-brand-glow">
-                                    Wager 10.00 USDso
+                                <button
+                                    disabled
+                                    className="w-full py-3 rounded-xl bg-brand font-bold text-xs text-white shadow-brand-glow"
+                                >
+                                    Place Wager (One-Tap)
                                 </button>
-
-                                <div className="text-[10px] text-muted text-center leading-tight">
-                                    Streamer cut routed automatically to splitter via <code className="text-slate-300">approveBuilder</code>.
-                                </div>
                             </div>
                         </div>
                     </div>

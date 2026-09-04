@@ -3,12 +3,15 @@
 import React, { useState } from 'react';
 import { useAccount, useWriteContract, useReadContract } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { parseUnits, maxUint256 } from 'viem';
+import { parseUnits, maxUint256, keccak256, toHex, type Address } from 'viem';
 import {
     WAGR_ESCROW,
+    WAGR_FACTORY,
     USDSO_TOKEN,
     escrowAbi,
+    factoryAbi,
     erc20Abi,
+    publicClient,
     KNOWN_DREAMDEX_MARKETS,
     fmtUsd,
     formatCountdown,
@@ -58,6 +61,23 @@ export default function StandaloneWidgetPage({ params }: { params: { creator: st
     async function handleWager() {
         try {
             sfx.stake();
+            let builderAddr: Address = '0x0000000000000000000000000000000000000000';
+            let builderBps = 0;
+            if (params.creator) {
+                try {
+                    const salt = keccak256(toHex(params.creator.toLowerCase()));
+                    builderAddr = (await publicClient.readContract({
+                        address: WAGR_FACTORY,
+                        abi: factoryAbi,
+                        functionName: 'predict',
+                        args: [salt],
+                    })) as Address;
+                    builderBps = 100; // 1.00% creator builder fee
+                } catch {
+                    // Fallback to zero builder fee if prediction fails
+                }
+            }
+
             await writeContractAsync({
                 address: WAGR_ESCROW,
                 abi: escrowAbi,
@@ -66,8 +86,8 @@ export default function StandaloneWidgetPage({ params }: { params: { creator: st
                     activeMarket.address,
                     side,
                     stakeBn,
-                    '0x0000000000000000000000000000000000000000',
-                    0,
+                    builderAddr,
+                    builderBps,
                 ],
             });
             setStatus('wagered');

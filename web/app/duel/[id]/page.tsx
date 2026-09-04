@@ -388,6 +388,8 @@ export default function DuelRoomPage({ params }: { params: { id: string } }) {
                 isOpen={showOutcomeModal}
                 onClose={() => setShowOutcomeModal(false)}
                 isWinner={isUserWinner}
+                isSpectator={!isParticipant}
+                winnerAddress={preview?.winner}
                 duelId={Number(duelId)}
                 payout={preview?.payout ?? (duel.stakeA + duel.stakeB)}
                 stake={isAlice ? duel.stakeA : duel.stakeB}
