@@ -5,7 +5,8 @@
 Wagr turns any DreamDEX binary market into a shareable 1v1 wager. When the oracle resolves the market, payouts are routed directly to the winner's wallet in the same block: zero claim vouchers, zero manual withdrawals, and zero user friction.
 
 **Live Application**: [https://wagr-app.vercel.app](https://wagr-app.vercel.app)  
-**Live Duel Room**: [https://wagr-app.vercel.app/duel/3](https://wagr-app.vercel.app/duel/3)
+**Create a Duel**: [https://wagr-app.vercel.app/create](https://wagr-app.vercel.app/create)  
+**Settled Duel (Proof)**: [https://wagr-app.vercel.app/duel/3](https://wagr-app.vercel.app/duel/3)
 
 ---
 
