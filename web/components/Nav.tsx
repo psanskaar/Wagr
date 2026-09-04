@@ -27,7 +27,6 @@ export function Nav() {
     const primaryLinks: { href: string; label: string; badge?: string }[] = [
         { href: '/markets', label: 'Markets' },
         { href: '/create', label: 'Create Duel' },
-        { href: '/arena', label: 'Anti-MEV', badge: 'Alpha' },
         { href: '/season', label: 'Tournaments' },
         { href: '/creators', label: 'Creator Studio' },
     ];
