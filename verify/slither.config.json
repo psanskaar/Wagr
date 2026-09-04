@@ -1,0 +1,10 @@
+{
+    "detectors_to_exclude": "naming-convention,solc-version,pragma,assembly",
+    "exclude_informational": false,
+    "exclude_low": false,
+    "filter_paths": "lib|test|script",
+    "solc_remaps": [
+        "@openzeppelin=lib/openzeppelin-contracts",
+        "forge-std=lib/forge-std/src"
+    ]
+}

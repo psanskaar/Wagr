@@ -1,0 +1,18 @@
+{
+  "network": "somnia-shannon",
+  "chainId": 50312,
+  "contracts": {
+    "WagrEscrow":          "0xc160f68e5f2e6846057ad6d4ada5d320b385c2cb",
+    "WagrSeason":          "0x890506b7288573412674d8e8f34622aeb57fa708",
+    "WagrSplitterFactory": "0x1190048fb57e44fdedb418696075e884a9d89308"
+  },
+  "external": {
+    "USDso":                "0x70a86d8842fb63c4ad2b7cdddf530ebf1bb25d8e",
+    "ReactivityPrecompile": "0x0000000000000000000000000000000000000100"
+  },
+  "proofTx": {
+    "settleDuel": "0xb8290da3b70add14e567b43fb75bcfd56951e69110a0e5cd631fae83f8858f33",
+    "block":      477711153,
+    "notes":      "Duel #1 on WagrEscrow v2. A1 bet NO on BTC 15m market 0x9a83..93cd. Market resolved NO. A1 won 19.9 tUSDC + 0.1 tUSDC platform fee. Verified on Shannon."
+  }
+}

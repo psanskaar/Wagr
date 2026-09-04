@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+cache
+broadcast
+.env
+.env.local
+.env.*.local
+lcov.info
+coverage
+dist
+.DS_Store
+contracts/lib
+contracts/out
+contracts/cache

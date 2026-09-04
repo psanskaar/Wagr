@@ -1,0 +1,17 @@
+{
+    "name": "wagr",
+    "version": "0.1.0",
+    "private": true,
+    "packageManager": "pnpm@9.9.0",
+    "workspaces": ["keeper", "web"],
+    "scripts": {
+        "dev:web":       "pnpm --filter wagr-web dev",
+        "dev:keeper":    "pnpm --filter wagr-keeper dev",
+        "test":          "cd contracts && forge test -vvv",
+        "coverage":      "cd contracts && forge coverage",
+        "halmos":        "cd contracts && halmos --contract WagrEscrowSymbolic -vv",
+        "sdk-diff":      "node verify/sdk-diff.mjs",
+        "deploy:shannon":"cd contracts && forge script script/Deploy.s.sol --rpc-url shannon --broadcast",
+        "seed:demo":     "cd contracts && forge script script/SeedDemo.s.sol --rpc-url shannon --broadcast"
+    }
+}

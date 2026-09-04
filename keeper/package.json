@@ -1,0 +1,22 @@
+{
+  "name": "wagr-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "subscribe": "tsx src/subscribe.ts",
+    "fallback": "tsx src/fallback.ts",
+    "dev": "tsx src/subscribe.ts"
+  },
+  "dependencies": {
+    "@somnia-chain/markets-sdk": "^0.28.0",
+    "@somnia-chain/reactivity": "^0.2.1",
+    "viem": "^2.21.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}
