@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Farcaster Frame endpoint for a duel.
- * A Warpcast user pasting a link `https://wagr.xyz/duel/<id>` sees the
+ * A Warpcast user pasting a link `https://wagr-app.vercel.app/duel/<id>` sees the
  * duel rendered as an interactive Frame with two buttons: "Accept" and
  * "Watch". "Accept" deep-links to /duel/<id> where the wallet flow starts.
  *
@@ -13,7 +13,7 @@ export const runtime = 'edge';
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
     const url =
         process.env.NEXT_PUBLIC_APP_URL ??
-        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://wagr.xyz');
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://wagr-app.vercel.app');
     const html = `<!doctype html>
 <html><head>
   <meta property="og:image"                          content="${url}/api/og/duel/${params.id}" />

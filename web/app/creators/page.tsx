@@ -183,7 +183,7 @@ export default function CreatorStudioPage() {
     }
 
     const embedSnippet = `<iframe src="${
-        typeof window !== 'undefined' ? window.location.origin : 'https://wagr.xyz'
+        typeof window !== 'undefined' ? window.location.origin : 'https://wagr-app.vercel.app'
     }/widget/${creatorHandle}" width="340" height="460" frameborder="0" style="border-radius: 16px; overflow: hidden;" allow="clipboard-write"></iframe>`;
 
     const copyEmbed = () => {

@@ -12,7 +12,7 @@ const inter = Inter({
 export const metadata: Metadata = {
     metadataBase: new URL(
         process.env.NEXT_PUBLIC_APP_URL ||
-            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://wagr.xyz')
+            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://wagr-app.vercel.app')
     ),
     title: 'WAGR: Peer-to-Peer Prediction Layer on DreamDEX & Somnia',
     description:
