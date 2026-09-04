@@ -2,11 +2,11 @@
 
 > Peer-to-peer prediction duels on DreamDEX event contracts with zero-click automated payouts powered by Somnia Reactivity.
 
-Wagr turns any DreamDEX binary market into a shareable 1v1 wager. When the oracle resolves the market, payouts are routed directly to the winner's wallet in the same block: zero claim vouchers, zero manual withdrawals, and zero user friction.
-
 **Live Application**: [https://wagr-app.vercel.app](https://wagr-app.vercel.app)  
 **Create a Duel**: [https://wagr-app.vercel.app/create](https://wagr-app.vercel.app/create)  
 **Settled Duel (Proof)**: [https://wagr-app.vercel.app/duel/3](https://wagr-app.vercel.app/duel/3)
+
+Wagr turns any DreamDEX binary market into a shareable 1v1 wager. When the oracle resolves the market, payouts are routed directly to the winner's wallet in the same block: zero claim vouchers, zero manual withdrawals, and zero user friction.
 
 ---
 
@@ -30,6 +30,52 @@ Wagr settles duels automatically using Somnia's execution model:
 - **Somnia Reactivity Transport**: `WagrEscrow` implements `ISomniaEventHandler`. Upon market resolution, Somnia validators call `onEvent(...)` from precompile `0x0000000000000000000000000000000000000100`.
 - **Direct Push Payout**: Settlement calls `collateral.safeTransfer(winner, payout)` within the resolution transaction.
 - **Relayer Fallback**: The Next.js backend endpoint `/api/settle` monitors resolution state and provides redundant settlement triggers so users never have to manually claim.
+
+---
+
+## Creator & Streamer Widget Lifecycle
+
+Streamers and creators can monetize their audiences by embedding interactive prediction widgets into Twitch, Kick, YouTube livestreams, or linktrees:
+
+```mermaid
+sequenceDiagram
+    participant Streamer
+    participant Factory as WagrSplitterFactory
+    participant Viewer as Viewer (Stream Chat)
+    participant Escrow as WagrEscrow
+    participant Splitter as WagrSplitter (CREATE2)
+
+    Note over Streamer,Factory: Prerequisite: Streamer Registration
+    Streamer->>Factory: createSplitter(salt=keccak256("streamer"), recipients=[(streamer, 10000)])
+    Factory-->>Streamer: Deploys immutable CREATE2 WagrSplitter clone
+
+    Note over Viewer,Escrow: Viewer Wager Flow
+    Streamer->>Viewer: Embeds /widget/streamer in stream or chat
+    Viewer->>Escrow: createDuel(market, side, stake, builder=Splitter, builderBps=100)
+    Note over Escrow: Duel pot locked. Viewer shares duel link in live chat.
+    
+    Note over Escrow,Splitter: Resolution & Fee Routing
+    Escrow->>Splitter: Pushes 1.00% builder fee upon Reactivity settlement
+    Streamer->>Splitter: Calls claim() via Creator Studio to withdraw earnings
+```
+
+### Complete 5-Step Lifecycle:
+
+1. **Prerequisite: Deploy Splitter via Creator Studio (`/creators`)**:
+   - Before earning fees, the creator visits `/creators`, enters their handle (e.g. `kaicenat`), and specifies their payout address.
+   - Calling `Deploy Splitter` executes `WagrSplitterFactory.createSplitter(...)` via CREATE2, deploying an immutable, gas-efficient minimal proxy clone on Somnia Shannon.
+2. **Embed or Share Widget Link (`/widget/[creator]`)**:
+   - The creator embeds their custom widget URL (e.g. `https://wagr-app.vercel.app/widget/kaicenat`) into OBS browser sources, Twitch panels, or pinned live chat messages.
+3. **Viewer Places a Wager**:
+   - A viewer selects an active DreamDEX market, picks **UP** or **DOWN**, and deposits their stake (e.g., 10 USDso).
+   - The widget resolves the creator's CREATE2 splitter address and routes the duel to `WagrEscrow.createDuel` with `builder = streamerSplitter` and `builderBps = 100` (1.00%).
+4. **Chat Duel Matching & Reactivity Settlement**:
+   - The viewer copies their live challenge link into stream chat. A second viewer takes the opposing side.
+   - When DreamDEX resolves the market, Somnia Reactivity auto-triggers `WagrEscrow.onEvent(...)`.
+   - The contract pushes the **1.00% builder fee (0.20 USDso on a 20 USDso pot)** directly into the streamer's splitter, while the winner receives their payout instantly.
+5. **Streamer Revenue Withdrawal**:
+   - The streamer returns to the `/creators` dashboard at any time to monitor total volume and pending fees.
+   - Tapping **Claim Accrued Creator Fees** calls `WagrSplitter.claim()`, transferring all accumulated USDso to their wallet.
 
 ---
 

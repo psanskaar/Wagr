@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAccount, useWriteContract, useReadContract } from 'wagmi';
-import { keccak256, toHex, type Address } from 'viem';
+import { keccak256, toHex, isAddress, type Address } from 'viem';
 import { Nav } from '@/components/Nav';
 import { Confetti } from '@/components/Confetti';
 import {
@@ -37,11 +38,14 @@ interface RegisteredSplitter {
     txHash?: string;
 }
 
-export default function CreatorStudioPage() {
+function CreatorStudioInner() {
+    const searchParams = useSearchParams();
+    const paramCreator = searchParams.get('creator') || searchParams.get('handle') || '';
+
     const { address, isConnected } = useAccount();
     const { writeContractAsync } = useWriteContract();
 
-    const [creatorHandle, setCreatorHandle] = useState('streamer');
+    const [creatorHandle, setCreatorHandle] = useState(paramCreator || 'streamer');
     const [coHostAddr, setCoHostAddr] = useState('');
     const [streamerShare, setStreamerShare] = useState(80); // 80%
     const [coHostShare, setCoHostShare] = useState(20); // 20%
@@ -99,17 +103,32 @@ export default function CreatorStudioPage() {
         });
     };
 
-    // Compute salt from handle
+    // Listen to query parameters (?creator= or ?handle=)
+    useEffect(() => {
+        const p = searchParams.get('creator') || searchParams.get('handle');
+        if (p) {
+            setCreatorHandle(p);
+        }
+    }, [searchParams]);
+
+    // Compute salt from handle (if not a raw address)
     useEffect(() => {
         if (!creatorHandle) return;
-        const s = keccak256(toHex(creatorHandle.toLowerCase()));
-        setSalt(s);
+        if (!isAddress(creatorHandle)) {
+            const s = keccak256(toHex(creatorHandle.toLowerCase()));
+            setSalt(s);
+        }
     }, [creatorHandle]);
 
-    // Predict splitter address via factory
+    // Predict splitter address via factory or use direct address
     useEffect(() => {
         let active = true;
         async function getPredicted() {
+            if (!creatorHandle) return;
+            if (isAddress(creatorHandle)) {
+                if (active) setPredictedSplitter(creatorHandle as Address);
+                return;
+            }
             try {
                 const addr = (await publicClient.readContract({
                     address: WAGR_FACTORY,
@@ -123,11 +142,11 @@ export default function CreatorStudioPage() {
                 // prediction fallback
             }
         }
-        if (salt) getPredicted();
+        if (salt || isAddress(creatorHandle)) getPredicted();
         return () => {
             active = false;
         };
-    }, [salt]);
+    }, [salt, creatorHandle]);
 
     // Enforced Handle Availability & Bytecode Check on Somnia Shannon
     useEffect(() => {
@@ -142,27 +161,38 @@ export default function CreatorStudioPage() {
                 const isDeployed = Boolean(code && code !== '0x' && code.length > 2);
 
                 if (!isDeployed) {
-                    if (active) setHandleStatus('available');
+                    if (active) {
+                        setHandleStatus('available');
+                        setDeployedSplitter(null);
+                    }
                 } else {
+                    if (active) setDeployedSplitter(predictedSplitter);
                     // Check if current user is part of the splitter recipients
                     if (address) {
                         try {
-                            const [owedAmt, isRecip] = await Promise.all([
-                                publicClient.readContract({
+                            const count = (await publicClient.readContract({
+                                address: predictedSplitter,
+                                abi: splitterAbi,
+                                functionName: 'recipientCount',
+                            })) as bigint;
+
+                            let isRecipient = false;
+                            for (let i = 0; i < Number(count); i++) {
+                                const r = (await publicClient.readContract({
                                     address: predictedSplitter,
                                     abi: splitterAbi,
-                                    functionName: 'owed',
-                                    args: [USDSO_TOKEN, address],
-                                }),
-                                publicClient.readContract({
-                                    address: predictedSplitter,
-                                    abi: splitterAbi,
-                                    functionName: 'totalReceived',
-                                    args: [USDSO_TOKEN],
-                                }),
-                            ]);
-                            // If user is recognized on this splitter
-                            if (active) setHandleStatus('owned');
+                                    functionName: 'recipients',
+                                    args: [BigInt(i)],
+                                })) as [string, number];
+                                if (r[0].toLowerCase() === address.toLowerCase()) {
+                                    isRecipient = true;
+                                    break;
+                                }
+                            }
+
+                            if (active) {
+                                setHandleStatus(isRecipient ? 'owned' : 'taken');
+                            }
                         } catch {
                             if (active) setHandleStatus('taken');
                         }
@@ -193,24 +223,48 @@ export default function CreatorStudioPage() {
         let active = true;
         async function fetchEarnings() {
             try {
-                const [received, owed] = (await Promise.all([
-                    publicClient.readContract({
+                // 1. Total recorded on-chain in splitter
+                let totalReceived = 0n;
+                try {
+                    totalReceived = (await publicClient.readContract({
                         address: splitterAddr,
                         abi: splitterAbi,
                         functionName: 'totalReceived',
                         args: [USDSO_TOKEN],
-                    }),
-                    publicClient.readContract({
+                    })) as bigint;
+                } catch {}
+
+                // 2. Unaccrued delta from newly arrived funds
+                let unaccruedDelta = 0n;
+                try {
+                    const simAccrue = await publicClient.simulateContract({
                         address: splitterAddr,
                         abi: splitterAbi,
-                        functionName: 'owed',
-                        args: [USDSO_TOKEN, userAddr],
-                    }),
-                ])) as [bigint, bigint];
+                        functionName: 'accrue',
+                        args: [USDSO_TOKEN],
+                        account: userAddr,
+                    });
+                    unaccruedDelta = simAccrue.result as bigint;
+                } catch {}
+
+                // 3. User's exact claimable amount (unaccrued + owed)
+                let claimable = 0n;
+                try {
+                    const simClaim = await publicClient.simulateContract({
+                        address: splitterAddr,
+                        abi: splitterAbi,
+                        functionName: 'claim',
+                        args: [USDSO_TOKEN],
+                        account: userAddr,
+                    });
+                    claimable = simClaim.result as bigint;
+                } catch {
+                    // Reverts if nothing to claim or not recipient
+                }
 
                 if (active) {
-                    setTotalSplitterEarned(received);
-                    setClaimableAmount(owed);
+                    setTotalSplitterEarned(totalReceived + unaccruedDelta);
+                    setClaimableAmount(claimable);
                 }
             } catch {
                 // Splitter not yet deployed on Shannon
@@ -552,21 +606,29 @@ export default function CreatorStudioPage() {
 
                                 <div>
                                     <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">
-                                        Creator Handle (Salt seed)
+                                        Creator Handle or Splitter Address
                                     </label>
                                     <div className="flex items-center rounded-xl bg-bg border border-border px-4 py-3">
-                                        <span className="text-xs text-muted font-mono mr-1">@</span>
+                                        <span className="text-xs text-muted font-mono mr-1">
+                                            {isAddress(creatorHandle) ? '📍' : '@'}
+                                        </span>
                                         <input
                                             type="text"
                                             value={creatorHandle}
-                                            onChange={(e) => setCreatorHandle(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
-                                            placeholder="streamer"
+                                            onChange={(e) =>
+                                                setCreatorHandle(
+                                                    e.target.value.trim().replace(/[^a-zA-Z0-9_xX-]/g, '')
+                                                )
+                                            }
+                                            placeholder="streamer or 0x..."
                                             className="w-full bg-transparent font-mono text-sm text-white focus:outline-none"
                                         />
                                     </div>
                                     {handleStatus === 'taken' && (
                                         <p className="text-[11px] text-rose-400 mt-1.5 font-medium">
-                                            This username already has a deployed contract on Somnia Shannon. Pick another handle.
+                                            {isAddress(creatorHandle)
+                                                ? 'This Splitter contract exists on-chain, but your connected wallet is not registered as a recipient.'
+                                                : 'This username already has a deployed contract on Somnia Shannon. Pick another handle.'}
                                         </p>
                                     )}
                                 </div>
@@ -617,7 +679,14 @@ export default function CreatorStudioPage() {
 
                                 <button
                                     onClick={handleDeploySplitter}
-                                    disabled={isDeploying || !isConnected || handleStatus === 'taken' || !creatorHandle}
+                                    disabled={
+                                        isDeploying ||
+                                        !isConnected ||
+                                        handleStatus === 'taken' ||
+                                        handleStatus === 'owned' ||
+                                        !creatorHandle ||
+                                        isAddress(creatorHandle)
+                                    }
                                     className="w-full py-3.5 rounded-xl bg-brand hover:bg-brand-deep font-bold text-xs text-white shadow-brand-glow transition-all disabled:opacity-50"
                                 >
                                     {isDeploying
@@ -625,7 +694,9 @@ export default function CreatorStudioPage() {
                                         : handleStatus === 'owned'
                                         ? 'Splitter Already Deployed (Active)'
                                         : handleStatus === 'taken'
-                                        ? 'Handle Taken: Choose Another Name'
+                                        ? 'Contract / Handle Owned by Someone Else'
+                                        : isAddress(creatorHandle)
+                                        ? 'Existing Contract Selected'
                                         : 'Deploy Splitter (CREATE2)'}
                                 </button>
                             </div>
@@ -712,5 +783,13 @@ export default function CreatorStudioPage() {
                 </div>
             </main>
         </div>
+    );
+}
+
+export default function CreatorStudioPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-bg text-slate-200" />}>
+            <CreatorStudioInner />
+        </Suspense>
     );
 }
