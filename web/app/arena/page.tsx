@@ -664,6 +664,40 @@ export default function ArenaPage() {
                         </p>
                     </div>
 
+                    {/* EXPERIMENTAL / DANGER WARNING BOX */}
+                    <div className="rounded-2xl border-2 border-red-500/80 bg-red-950/40 p-5 sm:p-6 space-y-3.5 shadow-xl shadow-red-950/30">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-red-600 text-white shadow-sm">
+                                    <span className="h-2 w-2 rounded-full bg-white animate-ping" />
+                                    <span>⚠️ DANGER: EXPERIMENTAL ALPHA</span>
+                                </span>
+                                <span className="text-sm font-bold text-red-200">
+                                    Funds Can Become Trapped in Escrow
+                                </span>
+                            </div>
+                            <Link
+                                href="/create"
+                                className="inline-flex items-center gap-1 text-xs font-bold text-red-300 hover:text-white underline underline-offset-2"
+                            >
+                                <span>Switch to Standard Duel (Safe & Refundable)</span>
+                                <ArrowRightIcon className="w-3.5 h-3.5" />
+                            </Link>
+                        </div>
+
+                        <div className="space-y-2 text-xs text-red-100/90 leading-relaxed border-t border-red-500/20 pt-3">
+                            <p>
+                                <strong>Why your money could get stuck:</strong> This queue uses a zero-knowledge blind hash <code className="bg-red-900/60 px-1.5 py-0.5 rounded text-red-200 font-mono">keccak256(market, side, stake, salt, maker)</code>. Because parameters are sealed cryptographically, the smart contract does <em>not</em> know your market address, side, or expiry until an opponent reveals and matches your commitment.
+                            </p>
+                            <p>
+                                In this v1 testnet smart contract, <strong>there is no on-chain cancel or auto-refund function for unrevealed hashes</strong>. If nobody accepts your challenge before the underlying DreamDEX market window closes, your deposit remains locked in the contract escrow.
+                            </p>
+                            <p className="font-semibold text-red-300 pt-1">
+                                👉 If you want standard betting where you can cancel anytime for an instant 100% refund, please use <Link href="/create" className="text-white underline font-bold hover:text-brand-light">Create Peer Duel</Link> instead.
+                            </p>
+                        </div>
+                    </div>
+
                     {/* How Anti-MEV Actually Works - Explanatory Architecture Callout */}
                     <div className="rounded-2xl border border-border/80 bg-gradient-to-b from-surface/70 to-bg/90 p-5 sm:p-6 space-y-4">
                         <div className="flex items-center justify-between">

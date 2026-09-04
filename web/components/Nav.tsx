@@ -24,10 +24,10 @@ export function Nav() {
         },
     });
 
-    const primaryLinks = [
+    const primaryLinks: { href: string; label: string; badge?: string }[] = [
         { href: '/markets', label: 'Markets' },
         { href: '/create', label: 'Create Duel' },
-        { href: '/arena', label: 'Anti-MEV' },
+        { href: '/arena', label: 'Anti-MEV', badge: 'Alpha' },
         { href: '/season', label: 'Tournaments' },
         { href: '/creators', label: 'Creator Studio' },
     ];
@@ -64,13 +64,18 @@ export function Nav() {
                                     key={link.href}
                                     href={link.href}
                                     onClick={() => sfx.tap()}
-                                    className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+                                    className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                                         active
                                             ? 'text-white bg-surface'
                                             : 'text-muted hover:text-white hover:bg-surface/50'
                                     }`}
                                 >
-                                    {link.label}
+                                    <span>{link.label}</span>
+                                    {link.badge && (
+                                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-tight">
+                                            {link.badge}
+                                        </span>
+                                    )}
                                 </Link>
                             );
                         })}
@@ -141,11 +146,16 @@ export function Nav() {
                                     sfx.tap();
                                     setMobileOpen(false);
                                 }}
-                                className={`block px-3 py-2 rounded-md text-sm font-medium ${
+                                className={`flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium ${
                                     active ? 'bg-surface text-white' : 'text-muted hover:text-white'
                                 }`}
                             >
-                                {link.label}
+                                <span>{link.label}</span>
+                                {link.badge && (
+                                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-tight">
+                                        {link.badge}
+                                    </span>
+                                )}
                             </Link>
                         );
                     })}
