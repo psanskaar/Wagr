@@ -7,6 +7,9 @@ import {
     defineChain,
     type Address,
     type Hash,
+    keccak256,
+    encodeAbiParameters,
+    concat,
 } from 'viem';
 
 // ============================================================================
@@ -666,3 +669,316 @@ class SoundFX {
 }
 
 export const sfx = new SoundFX();
+
+// ============================================================================
+// Tournaments & Seasons Helpers
+// ============================================================================
+
+export interface TournamentMetadata {
+    id: number;
+    name: string;
+    description: string;
+    targetMarket: string;
+    durationHours: number;
+    endsAt: number; // Unix timestamp in ms
+    payoutDate: string;
+    rules: string;
+    prizeSplit: { first: number; second: number; third: number };
+    createdAt?: number;
+    claims?: Record<string, { index: number; account: string; amount: string; proof: string[] }>;
+}
+
+export const DEFAULT_TOURNAMENTS_META: Record<number, TournamentMetadata> = {
+    1: {
+        id: 1,
+        name: 'Somnia Genesis Tournament',
+        description: 'The inaugural multi-round prediction battle on Somnia Shannon testnet. Compete across active DreamDEX 15m and 1h markets.',
+        targetMarket: 'All DreamDEX Binary Markets',
+        durationHours: 72,
+        endsAt: 1788566400000,
+        payoutDate: 'Finalized (Merkle Closed)',
+        rules: 'Fixed 10 USDso entry. PnL scored across binary markets. Merkle root committed at close.',
+        prizeSplit: { first: 50, second: 30, third: 20 },
+        createdAt: 1788480000000,
+    },
+    2: {
+        id: 2,
+        name: 'High Stakes Shannon Cup',
+        description: 'Elite 50 USDso tournament for top prediction traders. Payout distributed via Merkle tree directly to top performers.',
+        targetMarket: 'BTC & ETH 15m / 1h Markets',
+        durationHours: 48,
+        endsAt: 1788800000000,
+        payoutDate: 'Sep 10, 2026 (At Close)',
+        rules: '50 USDso entry fee. Real-time on-chain entrant tracking. 100% of the pool paid to winners.',
+        prizeSplit: { first: 60, second: 25, third: 15 },
+        createdAt: 1788620000000,
+    },
+};
+
+export interface SeasonEntrant {
+    member: Address;
+    fee: bigint;
+    blockNumber: bigint;
+    txHash?: string;
+    timestamp?: number;
+}
+
+export interface LeaderboardEntry {
+    rank: number;
+    member: Address;
+    duelsPlayed: number;
+    duelsWon: number;
+    winRate: number;
+    netPnLUsd: number;
+    totalWageredUsd: number;
+    estimatedPrizeUsd: number;
+}
+
+/** Fetches real on-chain entrants via Blockscout indexed logs without 1000 block RPC limits */
+export async function fetchSeasonEntrants(seasonId: bigint): Promise<SeasonEntrant[]> {
+    try {
+        const url = `https://shannon-explorer.somnia.network/api?module=logs&action=getLogs&address=${WAGR_SEASON}&fromBlock=0&toBlock=latest`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Blockscout logs HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.status !== '1' || !Array.isArray(data.result)) return [];
+
+        const targetTopic0 = '0x8207f626cd2ac80b69bc22e9a606e3f3d80054d204ea47e6ea306cb017ee7ab8'.toLowerCase();
+        const targetSeasonHex = '0x' + seasonId.toString(16).padStart(64, '0').toLowerCase();
+
+        const entrants: SeasonEntrant[] = [];
+        const seen = new Set<string>();
+
+        for (const log of data.result) {
+            if (!log.topics || log.topics.length < 3) continue;
+            const t0 = (log.topics[0] || '').toLowerCase();
+            const t1 = (log.topics[1] || '').toLowerCase();
+            if (t0 === targetTopic0 && t1 === targetSeasonHex) {
+                const member = ('0x' + log.topics[2].slice(26)).toLowerCase() as Address;
+                if (!seen.has(member)) {
+                    seen.add(member);
+                    const fee = BigInt(log.data && log.data !== '0x' ? log.data : '0');
+                    entrants.push({
+                        member,
+                        fee,
+                        blockNumber: BigInt(parseInt(log.blockNumber, 16) || 0),
+                        txHash: log.transactionHash,
+                        timestamp: log.timeStamp ? parseInt(log.timeStamp, 16) * 1000 : undefined,
+                    });
+                }
+            }
+        }
+        return entrants;
+    } catch (err) {
+        console.warn('Failed to fetch season entrants from Blockscout:', err);
+        return [];
+    }
+}
+
+/** Computes live tournament performance (duels won, win rate, net PnL) for all entrants */
+export async function fetchTournamentLeaderboard(
+    entrants: SeasonEntrant[],
+    totalPool: bigint,
+    prizeSplit?: { first: number; second: number; third: number }
+): Promise<LeaderboardEntry[]> {
+    if (entrants.length === 0) return [];
+
+    try {
+        const nextId = (await publicClient.readContract({
+            address: WAGR_ESCROW,
+            abi: escrowAbi,
+            functionName: 'nextDuelId',
+        })) as bigint;
+
+        const count = Number(nextId);
+        const duelPromises = [];
+        const previewPromises = [];
+
+        for (let i = 1; i < count; i++) {
+            duelPromises.push(
+                publicClient.readContract({
+                    address: WAGR_ESCROW,
+                    abi: escrowAbi,
+                    functionName: 'getDuel',
+                    args: [BigInt(i)],
+                })
+            );
+            previewPromises.push(
+                publicClient
+                    .readContract({
+                        address: WAGR_ESCROW,
+                        abi: escrowAbi,
+                        functionName: 'previewPayout',
+                        args: [BigInt(i)],
+                    })
+                    .catch(() => null)
+            );
+        }
+
+        const [duels, previews] = await Promise.all([
+            Promise.all(duelPromises),
+            Promise.all(previewPromises),
+        ]);
+
+        const entrantStats = entrants.map((entrant) => {
+            const addrLower = entrant.member.toLowerCase();
+            let duelsPlayed = 0;
+            let duelsWon = 0;
+            let totalWagered = 0n;
+            let netPnL = 0n;
+
+            for (let i = 0; i < duels.length; i++) {
+                const d = duels[i] as any;
+                const prev = previews[i] as any;
+
+                const isAlice = d.alice.toLowerCase() === addrLower;
+                const isBob = d.bob && d.bob.toLowerCase() === addrLower;
+                if (!isAlice && !isBob) continue;
+
+                duelsPlayed++;
+                const stake = isAlice ? BigInt(d.stakeA) : BigInt(d.stakeB);
+                totalWagered += stake;
+
+                if (d.settled && prev) {
+                    const winner = prev[0] as Address;
+                    const payout = BigInt(prev[1] || 0);
+                    const voided = Boolean(prev[2]);
+
+                    if (voided) {
+                        // Refund: 0 PnL
+                    } else if (winner && winner.toLowerCase() === addrLower) {
+                        duelsWon++;
+                        netPnL += payout - stake;
+                    } else {
+                        netPnL -= stake;
+                    }
+                }
+            }
+
+            const winRate = duelsPlayed > 0 ? Math.round((duelsWon / duelsPlayed) * 100) : 0;
+            const netPnLUsd = Number(netPnL) / 1e6;
+            const totalWageredUsd = Number(totalWagered) / 1e6;
+
+            return {
+                member: entrant.member,
+                duelsPlayed,
+                duelsWon,
+                winRate,
+                netPnLUsd,
+                totalWageredUsd,
+            };
+        });
+
+        // Sort by netPnL descending, then duelsWon, then duelsPlayed
+        entrantStats.sort((a, b) => {
+            if (b.netPnLUsd !== a.netPnLUsd) return b.netPnLUsd - a.netPnLUsd;
+            if (b.duelsWon !== a.duelsWon) return b.duelsWon - a.duelsWon;
+            return b.duelsPlayed - a.duelsPlayed;
+        });
+
+        const poolNum = Number(totalPool) / 1e6;
+        const split = prizeSplit || { first: 60, second: 25, third: 15 };
+
+        return entrantStats.map((item, idx) => {
+            const rank = idx + 1;
+            let estimatedPrizeUsd = 0;
+            if (rank === 1) estimatedPrizeUsd = (poolNum * split.first) / 100;
+            else if (rank === 2) estimatedPrizeUsd = (poolNum * split.second) / 100;
+            else if (rank === 3) estimatedPrizeUsd = (poolNum * split.third) / 100;
+
+            return {
+                rank,
+                ...item,
+                estimatedPrizeUsd,
+            };
+        });
+    } catch (err) {
+        console.warn('Failed to compute tournament leaderboard:', err);
+        return [];
+    }
+}
+
+/** Computes leaf hash identical to WagrSeason.sol: keccak256(bytes.concat(keccak256(abi.encode(index, account, amount)))) */
+export function hashTournamentLeaf(index: bigint, account: Address, amount: bigint): `0x${string}` {
+    const inner = keccak256(
+        encodeAbiParameters(
+            [{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }],
+            [index, account, amount]
+        )
+    );
+    return keccak256(inner);
+}
+
+/** Builds an OpenZeppelin-compatible Merkle tree and generates proofs for all winners */
+export function buildTournamentMerkleTree(winners: { index: number; account: Address; amount: bigint }[]) {
+    if (winners.length === 0) {
+        return {
+            root: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+            claims: {},
+        };
+    }
+
+    const leaves = winners.map((w) => hashTournamentLeaf(BigInt(w.index), w.account, w.amount));
+
+    if (leaves.length === 1) {
+        return {
+            root: leaves[0],
+            claims: {
+                [winners[0].account.toLowerCase()]: {
+                    index: winners[0].index,
+                    account: winners[0].account,
+                    amount: winners[0].amount.toString(),
+                    proof: [] as string[],
+                },
+            },
+        };
+    }
+
+    function hashPair(a: `0x${string}`, b: `0x${string}`): `0x${string}` {
+        return a.toLowerCase() < b.toLowerCase()
+            ? keccak256(concat([a, b]))
+            : keccak256(concat([b, a]));
+    }
+
+    let currentLevel = [...leaves];
+    const treeLevels = [currentLevel];
+
+    while (currentLevel.length > 1) {
+        const nextLevel: `0x${string}`[] = [];
+        for (let i = 0; i < currentLevel.length; i += 2) {
+            if (i + 1 < currentLevel.length) {
+                nextLevel.push(hashPair(currentLevel[i], currentLevel[i + 1]));
+            } else {
+                nextLevel.push(currentLevel[i]);
+            }
+        }
+        treeLevels.push(nextLevel);
+        currentLevel = nextLevel;
+    }
+
+    const root = currentLevel[0];
+    const claims: Record<string, { index: number; account: string; amount: string; proof: string[] }> = {};
+
+    winners.forEach((w, leafIdx) => {
+        const proof: string[] = [];
+        let idx = leafIdx;
+        for (let l = 0; l < treeLevels.length - 1; l++) {
+            const level = treeLevels[l];
+            const siblingIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
+            if (siblingIdx < level.length) {
+                proof.push(level[siblingIdx]);
+            }
+            idx = Math.floor(idx / 2);
+        }
+        claims[w.account.toLowerCase()] = {
+            index: w.index,
+            account: w.account,
+            amount: w.amount.toString(),
+            proof,
+        };
+    });
+
+    return { root, claims };
+}
+
+
