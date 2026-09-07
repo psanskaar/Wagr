@@ -857,10 +857,10 @@ export async function fetchTournamentLeaderboard(
                 const isBob = d.bob && d.bob.toLowerCase() === addrLower;
                 if (!isAlice && !isBob) continue;
 
-                // Enforce tournament timeframe if startedAt is provided
-                const settledAt = Number(d.settledAt || 0);
-                if (startSec > 0 && settledAt > 0 && settledAt < startSec) continue;
-                if (closeSec > 0 && settledAt > 0 && settledAt > closeSec) continue;
+                // Enforce tournament timeframe: only count duels created within the tournament window
+                const duelTime = Number(d.createdAt || 0);
+                if (startSec > 0 && duelTime < startSec) continue;
+                if (closeSec > 0 && duelTime > closeSec) continue;
 
                 duelsPlayed++;
                 const stake = isAlice ? BigInt(d.stakeA) : BigInt(d.stakeB);
