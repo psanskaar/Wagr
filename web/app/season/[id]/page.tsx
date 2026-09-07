@@ -234,6 +234,82 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
     const isOpen =
         season?.payoutRoot === '0x0000000000000000000000000000000000000000000000000000000000000000';
 
+    // Effective claims: either from metadata or dynamically reconstructed from leaderboard
+    const effectiveClaims = useMemo(() => {
+        if (meta.claims && Object.keys(meta.claims).length > 0) {
+            return meta.claims;
+        }
+        if (!season || isOpen || leaderboard.length === 0) {
+            return undefined;
+        }
+        const split = meta.prizeSplit || { first: 60, second: 25, third: 15 };
+        const candidates = [
+            leaderboard.slice(0, 3),
+            leaderboard.slice(0, 2),
+            leaderboard.slice(0, 1),
+        ];
+        for (const top of candidates) {
+            if (top.length === 0) continue;
+            const winners = top.map((entry, idx) => {
+                let sharePct = split.first;
+                if (idx === 1) sharePct = split.second;
+                if (idx === 2) sharePct = split.third;
+                if (top.length === 1) sharePct = 100;
+                const amountBn = (season.pool * BigInt(sharePct)) / 100n;
+                return {
+                    index: idx,
+                    account: entry.member,
+                    amount: amountBn,
+                };
+            });
+            const { root, claims } = buildTournamentMerkleTree(winners);
+            if (root.toLowerCase() === season.payoutRoot.toLowerCase()) {
+                return claims;
+            }
+        }
+        return undefined;
+    }, [meta.claims, season, isOpen, leaderboard, meta.prizeSplit]);
+
+    // Check if user has an active winner claim
+    const userClaim = address && effectiveClaims ? effectiveClaims[address.toLowerCase()] : null;
+
+    // Track on-chain claim status for all winners
+    const [claimedMap, setClaimedMap] = useState<Record<number, boolean>>({});
+
+    useEffect(() => {
+        let active = true;
+        async function fetchAllClaimStatuses() {
+            if (!effectiveClaims || !season || isOpen) return;
+            const newMap: Record<number, boolean> = {};
+            for (const key of Object.keys(effectiveClaims)) {
+                const c = effectiveClaims[key];
+                try {
+                    const claimed = (await publicClient.readContract({
+                        address: WAGR_SEASON,
+                        abi: seasonAbi,
+                        functionName: 'isClaimed',
+                        args: [seasonId, BigInt(c.index)],
+                    })) as boolean;
+                    newMap[c.index] = claimed;
+                } catch (e) {
+                    // ignore
+                }
+            }
+            if (active) {
+                setClaimedMap(newMap);
+                if (userClaim) {
+                    setHasClaimed(Boolean(newMap[userClaim.index]));
+                }
+            }
+        }
+        fetchAllClaimStatuses();
+        const iv = setInterval(fetchAllClaimStatuses, 5000);
+        return () => {
+            active = false;
+            clearInterval(iv);
+        };
+    }, [effectiveClaims, season, isOpen, seasonId, userClaim]);
+
     const needsApproval =
         allowance !== undefined && season?.entryFee && (allowance as bigint) < season.entryFee;
 
@@ -247,9 +323,6 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
     const firstPrize = (poolNum * (meta.prizeSplit?.first || 60)) / 100;
     const secondPrize = (poolNum * (meta.prizeSplit?.second || 25)) / 100;
     const thirdPrize = (poolNum * (meta.prizeSplit?.third || 15)) / 100;
-
-    // Check if user has an active winner claim
-    const userClaim = address && meta.claims ? meta.claims[address.toLowerCase()] : null;
 
     async function handleApprove() {
         try {
@@ -376,15 +449,16 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
     }
 
     // Winner Claim Prize
-    async function handleClaimPrize() {
-        if (!userClaim || !address) return;
+    async function handleClaimPrize(customClaim?: { index: number; account: string; amount: string; proof: string[] }) {
+        const claimToUse = customClaim || userClaim;
+        if (!claimToUse || !address) return;
         try {
             setIsClaiming(true);
             sfx.stake();
 
-            const indexBn = BigInt(userClaim.index);
-            const amountBn = BigInt(userClaim.amount);
-            const proofHex = userClaim.proof as `0x${string}`[];
+            const indexBn = BigInt(claimToUse.index);
+            const amountBn = BigInt(claimToUse.amount);
+            const proofHex = claimToUse.proof as `0x${string}`[];
 
             const hash = await writeContractAsync({
                 address: WAGR_SEASON,
@@ -395,6 +469,7 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
 
             await publicClient.waitForTransactionReceipt({ hash });
             setHasClaimed(true);
+            setClaimedMap((prev) => ({ ...prev, [claimToUse.index]: true }));
             sfx.bigWin();
         } catch (err: any) {
             console.error('Claim error:', err);
@@ -527,14 +602,40 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
                                     </div>
                                 ) : (
                                     <button
-                                        onClick={handleClaimPrize}
+                                        onClick={() => handleClaimPrize()}
                                         disabled={isClaiming}
                                         className="px-6 py-3.5 rounded-xl bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-xs shadow-lg transition-all disabled:opacity-50 flex items-center gap-2"
                                     >
                                         <CoinsIcon className="w-4 h-4 text-black" />
-                                        <span>{isClaiming ? 'Claiming USDso…' : 'Claim Prize Payout'}</span>
+                                        <span>{isClaiming ? 'Claiming USDso...' : 'Claim Prize Payout'}</span>
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Finalized Merkle Escrow Notice */}
+                    {!isOpen && (
+                        <div className="rounded-2xl border border-purple-500/30 bg-purple-950/20 p-5 backdrop-blur-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-400">
+                                    <ShieldCheckIcon className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                                        <span>Tournament Settled on Somnia Shannon</span>
+                                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-bold">
+                                            Merkle Escrow Active
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-muted mt-0.5 max-w-xl">
+                                        Prize payouts are secured on-chain in the WagrSeason contract. Winners claim their share directly to their wallets via trustless cryptographic proof.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 font-mono text-[11px] bg-surface px-3 py-2 rounded-xl border border-border">
+                                <span className="text-muted">Merkle Root:</span>
+                                <span className="text-purple-300 font-bold">{shortHash(season.payoutRoot)}</span>
                             </div>
                         </div>
                     )}
@@ -641,7 +742,8 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
                                             <th className="pb-3 px-2 text-center">Duels (W / L)</th>
                                             <th className="pb-3 px-2 text-center">Win Rate</th>
                                             <th className="pb-3 px-2 text-right">Net PnL</th>
-                                            <th className="pb-3 pl-2 text-right">Prize Share</th>
+                                            <th className={`pb-3 ${isOpen ? 'pl-2 text-right' : 'px-2 text-right'}`}>Prize Share</th>
+                                            {!isOpen && <th className="pb-3 pl-2 text-right">Claim Status</th>}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/40">
@@ -683,7 +785,7 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
                                                         <span className="text-rose-400">{entry.duelsPlayed - entry.duelsWon}L</span>
                                                     </td>
                                                     <td className="py-3.5 px-2 text-center font-mono text-slate-300">
-                                                        {entry.duelsPlayed > 0 ? `${entry.winRate}%` : '—'}
+                                                        {entry.duelsPlayed > 0 ? `${entry.winRate}%` : '-'}
                                                     </td>
                                                     <td className="py-3.5 px-2 text-right font-mono font-bold">
                                                         <span
@@ -698,11 +800,48 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
                                                             {entry.netPnLUsd > 0 ? `+${entry.netPnLUsd.toFixed(2)}` : entry.netPnLUsd.toFixed(2)} USDso
                                                         </span>
                                                     </td>
-                                                    <td className="py-3.5 pl-2 text-right font-mono font-bold text-yellow-400">
+                                                    <td className={`py-3.5 ${isOpen ? 'pl-2' : 'px-2'} text-right font-mono font-bold text-yellow-400`}>
                                                         {entry.estimatedPrizeUsd > 0
                                                             ? `${entry.estimatedPrizeUsd.toFixed(2)} USDso`
-                                                            : '—'}
+                                                            : '-'}
                                                     </td>
+                                                    {!isOpen && (
+                                                        <td className="py-3.5 pl-2 text-right font-mono">
+                                                            {effectiveClaims && effectiveClaims[entry.member.toLowerCase()] ? (
+                                                                (() => {
+                                                                    const claim = effectiveClaims[entry.member.toLowerCase()];
+                                                                    const isClaimedOnChain = claimedMap[claim.index];
+                                                                    if (isClaimedOnChain) {
+                                                                        return (
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[11px] font-bold">
+                                                                                <CheckIcon className="w-3 h-3" />
+                                                                                <span>Claimed</span>
+                                                                            </span>
+                                                                        );
+                                                                    }
+                                                                    if (isUser) {
+                                                                        return (
+                                                                            <button
+                                                                                onClick={() => handleClaimPrize(claim)}
+                                                                                disabled={isClaiming}
+                                                                                className="px-2.5 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-black text-[11px] font-bold shadow transition-all disabled:opacity-50 inline-flex items-center gap-1"
+                                                                            >
+                                                                                <CoinsIcon className="w-3 h-3" />
+                                                                                <span>{isClaiming ? 'Claiming...' : 'Claim'}</span>
+                                                                            </button>
+                                                                        );
+                                                                    }
+                                                                    return (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 text-[11px] font-semibold">
+                                                                            <span>Eligible</span>
+                                                                        </span>
+                                                                    );
+                                                                })()
+                                                            ) : (
+                                                                <span className="text-muted text-[11px]">-</span>
+                                                            )}
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             );
                                         })}

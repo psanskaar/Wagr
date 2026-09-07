@@ -35,11 +35,25 @@ const DEFAULT_METADATA: Record<number, TournamentMetadata> = {
         description: 'Elite 50 USDso tournament for top prediction traders. Payout distributed via Merkle tree directly to top performers.',
         targetMarket: 'BTC & ETH 15m / 1h Markets',
         durationHours: 48,
-        endsAt: Date.now() + 48 * 3600 * 1000,
-        payoutDate: new Date(Date.now() + 50 * 3600 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        endsAt: 1788768904000,
+        payoutDate: 'Finalized on Shannon (Merkle Closed)',
         rules: '50 USDso entry fee. Real-time on-chain entrant tracking. 100% of the pool paid to winners.',
         prizeSplit: { first: 60, second: 25, third: 15 },
-        createdAt: Date.now(),
+        createdAt: 1788620000000,
+        claims: {
+            '0xdc21820b742cd82b881ee6e284b9db11bc585669': {
+                index: 0,
+                account: '0xdc21820b742cd82b881ee6e284b9db11bc585669',
+                amount: '60000000',
+                proof: ['0xe5d092ff399bd3e2ab046969e5ff5dc36c5544ced55b128c825b76b816d35308'],
+            },
+            '0xea499cf7c09b224d277b511990a2ef010f18fcbf': {
+                index: 1,
+                account: '0xea499cf7c09b224d277b511990a2ef010f18fcbf',
+                amount: '25000000',
+                proof: ['0xcdd95ee420dd8c67508458083782620766a5a4018f844ca893be0a10b8eceec9'],
+            },
+        },
     },
 };
 
