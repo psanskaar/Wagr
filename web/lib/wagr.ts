@@ -793,7 +793,12 @@ export async function fetchSeasonEntrants(seasonId: bigint): Promise<SeasonEntra
 export async function fetchTournamentLeaderboard(
     entrants: SeasonEntrant[],
     totalPool: bigint,
-    prizeSplit?: { first: number; second: number; third: number }
+    prizeSplit?: { first: number; second: number; third: number },
+    options?: {
+        startedAt?: bigint;
+        closedAt?: bigint;
+        claims?: Record<string, { index: number; account: string; amount: string; proof: string[] }>;
+    }
 ): Promise<LeaderboardEntry[]> {
     if (entrants.length === 0) return [];
 
@@ -834,6 +839,9 @@ export async function fetchTournamentLeaderboard(
             Promise.all(previewPromises),
         ]);
 
+        const startSec = options?.startedAt ? Number(options.startedAt) : 0;
+        const closeSec = options?.closedAt && options.closedAt > 0n ? Number(options.closedAt) : 0;
+
         const entrantStats = entrants.map((entrant) => {
             const addrLower = entrant.member.toLowerCase();
             let duelsPlayed = 0;
@@ -848,6 +856,11 @@ export async function fetchTournamentLeaderboard(
                 const isAlice = d.alice.toLowerCase() === addrLower;
                 const isBob = d.bob && d.bob.toLowerCase() === addrLower;
                 if (!isAlice && !isBob) continue;
+
+                // Enforce tournament timeframe if startedAt is provided
+                const settledAt = Number(d.settledAt || 0);
+                if (startSec > 0 && settledAt > 0 && settledAt < startSec) continue;
+                if (closeSec > 0 && settledAt > 0 && settledAt > closeSec) continue;
 
                 duelsPlayed++;
                 const stake = isAlice ? BigInt(d.stakeA) : BigInt(d.stakeB);
@@ -883,7 +896,31 @@ export async function fetchTournamentLeaderboard(
             };
         });
 
-        // Sort by netPnL descending, then duelsWon, then duelsPlayed
+        // If the tournament has committed on-chain claims, rank and price based on the committed settlement
+        const claims = options?.claims;
+        if (claims && Object.keys(claims).length > 0) {
+            entrantStats.sort((a, b) => {
+                const claimA = claims[a.member.toLowerCase()];
+                const claimB = claims[b.member.toLowerCase()];
+                if (claimA && claimB) return claimA.index - claimB.index;
+                if (claimA) return -1;
+                if (claimB) return 1;
+                if (b.netPnLUsd !== a.netPnLUsd) return b.netPnLUsd - a.netPnLUsd;
+                return b.duelsWon - a.duelsWon;
+            });
+
+            return entrantStats.map((item, idx) => {
+                const claim = claims[item.member.toLowerCase()];
+                const prizeUsd = claim ? Number(claim.amount) / 1e6 : 0;
+                return {
+                    rank: idx + 1,
+                    ...item,
+                    estimatedPrizeUsd: prizeUsd,
+                };
+            });
+        }
+
+        // Live Tournament: Sort by netPnL descending, then duelsWon, then duelsPlayed
         entrantStats.sort((a, b) => {
             if (b.netPnLUsd !== a.netPnLUsd) return b.netPnLUsd - a.netPnLUsd;
             if (b.duelsWon !== a.duelsWon) return b.duelsWon - a.duelsWon;

@@ -198,8 +198,17 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
 
                 if (active) {
                     setMembers(entrants);
-                    // Compute live tournament leaderboard based on duel performance
-                    const lb = await fetchTournamentLeaderboard(entrants, currentSeason.pool, meta.prizeSplit);
+                    // Compute tournament leaderboard based on duel performance within tournament timeframe
+                    const lb = await fetchTournamentLeaderboard(
+                        entrants,
+                        currentSeason.pool,
+                        meta.prizeSplit,
+                        {
+                            startedAt: currentSeason.startedAt,
+                            closedAt: currentSeason.closedAt,
+                            claims: meta.claims || DEFAULT_TOURNAMENTS_META[idNum]?.claims,
+                        }
+                    );
                     setLeaderboard(lb);
                     setLoading(false);
                 }
@@ -381,28 +390,42 @@ export default function SeasonDetailPage({ params }: { params: { id: string } })
             setIsFinalizing(true);
             sfx.stake();
 
+            // Re-fetch fresh on-chain pool at the moment of settlement
+            const freshSeason = (await publicClient.readContract({
+                address: WAGR_SEASON,
+                abi: seasonAbi,
+                functionName: 'seasons',
+                args: [seasonId],
+            })) as any;
+            const totalPoolBn = BigInt(freshSeason[1] || season.pool);
+
             // Build winners from top of the leaderboard
             const topEntrants = leaderboard.slice(0, 3);
-            const totalPoolBn = season.pool;
             const split = meta.prizeSplit || { first: 60, second: 25, third: 15 };
 
+            // Proportional allocation so 100% of pool is distributed with zero dust
+            const totalWeight = topEntrants.reduce((sum, _, idx) => {
+                if (idx === 0) return sum + BigInt(split.first);
+                if (idx === 1) return sum + BigInt(split.second);
+                if (idx === 2) return sum + BigInt(split.third);
+                return sum;
+            }, 0n);
+
+            let distributed = 0n;
             const winners = topEntrants.map((entry, idx) => {
-                let sharePct = split.first;
-                if (idx === 1) sharePct = split.second;
-                if (idx === 2) sharePct = split.third;
-                // Compute exact amount
-                const amountBn = (totalPoolBn * BigInt(sharePct)) / 100n;
+                let weight = BigInt(split.first);
+                if (idx === 1) weight = BigInt(split.second);
+                if (idx === 2) weight = BigInt(split.third);
+                const amountBn = idx === topEntrants.length - 1
+                    ? totalPoolBn - distributed
+                    : (totalPoolBn * weight) / totalWeight;
+                distributed += amountBn;
                 return {
                     index: idx,
                     account: entry.member,
                     amount: amountBn,
                 };
             });
-
-            // If only 1 player, give 100% of pool to #1
-            if (winners.length === 1) {
-                winners[0].amount = totalPoolBn;
-            }
 
             const totalPayoutBn = winners.reduce((acc, w) => acc + w.amount, 0n);
 
