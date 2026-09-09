@@ -80,7 +80,7 @@ export default function FaucetAndDocsPage() {
         {
             title: '2. Verify Zero-Click Settlement by Precompile',
             desc: 'Inspect the DuelSettled event showing viaReactivity=true, called by 0x00..0100.',
-            cmd: `cast logs --address ${WAGR_ESCROW} "DuelSettled(uint256,address,uint8,uint256,bool,bool)" --from-block 477711000 --rpc-url ${SHANNON_RPC}`,
+            cmd: `cast logs --address ${WAGR_ESCROW} "DuelSettled(uint256,address,uint8,uint256,bool,bool)" --from-block 477711000 --to-block 477711500 --rpc-url ${SHANNON_RPC}`,
         },
         {
             title: '3. Read Aggregate On-Chain Volume',

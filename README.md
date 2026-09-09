@@ -4,7 +4,8 @@
 
 **Live Application**: [https://wagr-app.vercel.app](https://wagr-app.vercel.app)  
 **Create a Duel**: [https://wagr-app.vercel.app/create](https://wagr-app.vercel.app/create)  
-**Settled Duel (Proof)**: [https://wagr-app.vercel.app/duel/3](https://wagr-app.vercel.app/duel/3)
+**Settled Duel (Proof)**: [https://wagr-app.vercel.app/duel/3](https://wagr-app.vercel.app/duel/3)  
+**Developer Feedback**: [FEEDBACK.md](./FEEDBACK.md)
 
 Wagr turns any DreamDEX binary market into a shareable 1v1 wager. When the oracle resolves the market, payouts are routed directly to the winner's wallet in the same block: zero claim vouchers, zero manual withdrawals, and zero user friction.
 
@@ -108,6 +109,30 @@ Full test suite with unit tests, stateful invariant fuzzing, and formal Halmos s
 | **Halmos Symbolic** | `halmos` | 4 formal properties proving zero overpay, unresolved revert, void refund, and idempotency |
 | **Code Coverage** | `forge coverage` | 100% source code coverage across core escrow functions |
 | **Static Analysis** | Slither & CodeQL | Configured in CI with zero high or medium findings |
+
+---
+
+## Hackathon Judge Reproducer Commands
+
+Run these one-liners directly in your terminal using Foundry `cast` to independently verify contract state and automated settlement on Somnia Shannon testnet:
+
+### 1. Inspect Duel #1 on Shannon
+Verifies duel state: Alice vs Bob stakes, market address, and settled flag:
+```bash
+cast call 0xc160f68e5f2e6846057ad6d4ada5d320b385c2cb "getDuel(uint256)((address,uint128,uint8,bool,address,uint128,address,uint64,address,uint16))" 1 --rpc-url https://api.infra.testnet.somnia.network
+```
+
+### 2. Verify Zero-Click Settlement by Precompile
+Inspect the `DuelSettled` event for Duel #1 showing instant payout execution at block `#477711153`:
+```bash
+cast logs --address 0xc160f68e5f2e6846057ad6d4ada5d320b385c2cb "DuelSettled(uint256,address,uint8,uint256,bool,bool)" --from-block 477711000 --to-block 477711500 --rpc-url https://api.infra.testnet.somnia.network
+```
+
+### 3. Read Aggregate On-Chain Volume
+Query total USDso volume escrowed and settled by Wagr on Shannon:
+```bash
+cast call 0xc160f68e5f2e6846057ad6d4ada5d320b385c2cb "totalWagered()(uint256)" --rpc-url https://api.infra.testnet.somnia.network
+```
 
 ---
 
