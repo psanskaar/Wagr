@@ -7,10 +7,13 @@ optimizer = true
 optimizer_runs = 200
 via_ir = false
 evm_version = "cancun"
+dynamic_test_linking = false
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "forge-std/=lib/forge-std/src/",
+    "halmos-cheatcodes/=lib/halmos-cheatcodes/src/",
 ]
+
 
 [fuzz]
 runs = 512
@@ -31,3 +34,4 @@ shannon = { key = "unused", url = "https://shannon-explorer.somnia.network/api" 
 verbosity = 3
 fuzz = { runs = 1024 }
 invariant = { runs = 256, depth = 64 }
+
