@@ -100,7 +100,7 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         expandTelegramViewport();
     }, []);
 
-    // Handle deep link routing if startapp=duel_[ID] was passed
+    // Handle deep link routing if startapp=duel_[ID] was passed (preserving hash for Privy)
     useEffect(() => {
         if (!hasHandledDeepLink.current) {
             const startParam = getTelegramStartParam();
@@ -109,7 +109,8 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
                 hasHandledDeepLink.current = true;
                 const targetPath = `/duel/${duelId}`;
                 if (pathname !== targetPath) {
-                    router.replace(targetPath);
+                    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+                    router.replace(targetPath + hash);
                 }
             }
         }
