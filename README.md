@@ -131,6 +131,7 @@ RPC: `https://api.infra.testnet.somnia.network`
 | **Reactivity Precompile** | `0x0000000000000000000000000000000000000100` | Somnia Native Event Dispatcher |
 
 *Verified On-Chain Proof Tx: [`0xb8290da3b70add14e567b43fb75bcfd56951e69110a0e5cd631fae83f8858f33`](https://shannon-explorer.somnia.network/tx/0xb8290da3b70add14e567b43fb75bcfd56951e69110a0e5cd631fae83f8858f33) (Block #477711153)*
+  -**Settled Duel Room (UI Proof)**: [https://wagr-app.vercel.app/duel/1](https://wagr-app.vercel.app/duel/1)
 
 ---
 
@@ -144,8 +145,8 @@ Full test suite with unit tests, stateful invariant fuzzing, and formal Halmos s
 | **Invariant Campaigns** | Stateful Fuzzing | 2 campaigns (4,096 calls each; 128 runs at depth 32) verifying total escrow solvency |
 | **Total Test Suite** | `forge test` | 26 passed, 0 failed, 0 skipped across 5 suites |
 | **Halmos Symbolic** | `halmos` | 4 formal properties proving zero overpay, unresolved revert, void refund, and idempotency |
-| **Code Coverage** | `forge coverage` | 100% source code coverage across core escrow functions |
-| **Static Analysis** | Slither & CodeQL | Configured in CI with zero high or medium findings |
+| **Code Coverage** | `forge coverage` | source code coverage across core escrow functions |
+
 
 ---
 
