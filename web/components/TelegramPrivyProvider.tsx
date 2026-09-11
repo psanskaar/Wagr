@@ -77,7 +77,7 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
     // Privy core authentication state
-    const { ready: privyReady, authenticated, user, exportWallet } = usePrivy();
+    const { ready: privyReady, authenticated, user, exportWallet, getAccessToken } = usePrivy();
     const { login: loginTelegram, state: telegramState } = useLoginWithTelegram();
 
     // Privy connected wallets list
@@ -255,13 +255,16 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         }
     }, [status, embeddedWallet, setActiveWallet]);
 
-    // Faucet claim function: only executed when confirmedAddress is valid
+    // Faucet claim function: executed when confirmedAddress is valid and user is ready
     const requestFunds = async (claimType: 'starter' | 'stt' | 'tusdc' | 'both', target?: string) => {
         const dest = target || confirmedAddress;
         if (!dest) return;
 
         const initData = getTelegramInitDataString();
-        if (!initData) {
+        const privyUserId = user?.id;
+
+        // Ensure we have at least one valid authentication anchor
+        if (!initData && !privyUserId) {
             setFundError('Telegram session data missing. Cannot verify claim.');
             return;
         }
@@ -269,24 +272,37 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         setIsFunding(true);
         setFundError(null);
         try {
+            let privyToken: string | undefined;
+            if (getAccessToken) {
+                try {
+                    privyToken = (await getAccessToken()) || undefined;
+                } catch {}
+            }
+
             const res = await fetch('/api/telegram/fund', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    initData,
+                    initData: initData || undefined,
+                    privyUserId: privyUserId || undefined,
+                    privyToken,
                     targetAddress: dest,
                     claimType,
                 }),
             });
             const data = await res.json();
             if (data.success) {
-                const label =
-                    claimType === 'stt'
-                        ? '1 STT (gas)'
-                        : claimType === 'tusdc'
-                        ? '500 tUSDC'
-                        : '1 STT + 500 tUSDC';
-                setFundSuccess(`Testnet grant added: ${label}`);
+                if (data.message) {
+                    setFundSuccess(data.message);
+                } else {
+                    const label =
+                        claimType === 'stt'
+                            ? '1 STT (gas)'
+                            : claimType === 'tusdc'
+                            ? '500 tUSDC'
+                            : '1 STT + 500 tUSDC';
+                    setFundSuccess(`Testnet grant added: ${label}`);
+                }
             } else {
                 setFundError(data.error || 'Failed to claim tokens');
             }

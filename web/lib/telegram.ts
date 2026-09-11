@@ -5,6 +5,7 @@ import {
     hapticFeedbackNotificationOccurred,
     hapticFeedbackImpactOccurred,
     openTelegramLink as sdkOpenTelegramLink,
+    retrieveRawInitData,
 } from '@telegram-apps/sdk-react';
 
 export const TELEGRAM_BOT_USERNAME = 'WagrDuelBot';
@@ -59,27 +60,76 @@ export function isTelegramWebApp(): boolean {
 export function getTelegramInitDataString(): string {
     if (typeof window === 'undefined') return '';
 
+    // 1. Check window.Telegram.WebApp.initData (populated by telegram-web-app.js)
     try {
         const tg = (window as any).Telegram?.WebApp;
-        if (tg?.initData) return tg.initData;
+        if (tg?.initData) {
+            try {
+                sessionStorage.setItem('wagr_tg_init_data', tg.initData);
+            } catch {}
+            return tg.initData;
+        }
+    } catch {}
 
+    // 2. Check official SDK retrieval
+    try {
+        const raw = retrieveRawInitData();
+        if (raw) {
+            try {
+                sessionStorage.setItem('wagr_tg_init_data', raw);
+            } catch {}
+            return raw;
+        }
+    } catch {}
+
+    // 3. Check sessionStorage cache
+    try {
+        const cached = sessionStorage.getItem('wagr_tg_init_data');
+        if (cached) return cached;
+    } catch {}
+
+    // 4. Check URL hash (preserving and parsing direct initData or tgWebAppData)
+    try {
         if (window.location.hash) {
             const hashStr = window.location.hash.startsWith('#')
                 ? window.location.hash.slice(1)
                 : window.location.hash;
+
+            // Direct initData in hash
+            if (hashStr.includes('hash=') && (hashStr.includes('user=') || hashStr.includes('query_id='))) {
+                const hashParams = new URLSearchParams(hashStr);
+                const tgData = hashParams.get('tgWebAppData');
+                const result = tgData || hashStr;
+                try {
+                    sessionStorage.setItem('wagr_tg_init_data', result);
+                } catch {}
+                return result;
+            }
+
             const hashParams = new URLSearchParams(hashStr);
             const tgData = hashParams.get('tgWebAppData');
-            if (tgData) return tgData;
+            if (tgData) {
+                try {
+                    sessionStorage.setItem('wagr_tg_init_data', tgData);
+                } catch {}
+                return tgData;
+            }
         }
+    } catch {}
 
+    // 5. Check URL search query
+    try {
         if (window.location.search) {
             const searchParams = new URLSearchParams(window.location.search);
             const tgData = searchParams.get('tgWebAppData');
-            if (tgData) return tgData;
+            if (tgData) {
+                try {
+                    sessionStorage.setItem('wagr_tg_init_data', tgData);
+                } catch {}
+                return tgData;
+            }
         }
-    } catch {
-        // Ignore parsing errors
-    }
+    } catch {}
 
     return '';
 }

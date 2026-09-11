@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
+import Script from 'next/script';
 import { Providers } from '@/components/Providers';
 
 const inter = Inter({
@@ -38,6 +39,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="en" className={`dark ${inter.variable}`}>
+            <head>
+                <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
+            </head>
             <body className="bg-bg text-slate-100 font-sans antialiased selection:bg-brand/30 selection:text-white">
                 <Providers>{children}</Providers>
             </body>
