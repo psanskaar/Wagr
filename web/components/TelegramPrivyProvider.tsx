@@ -98,20 +98,45 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         expandTelegramViewport();
     }, []);
 
-    // Handle deep link routing if startapp=duel_[ID] was passed (preserving hash for Privy)
+    // Handle deep link routing if startapp=duel_[ID] was passed
     useEffect(() => {
-        if (!hasHandledDeepLink.current) {
+        const checkAndRoute = () => {
+            if (hasHandledDeepLink.current) return;
             const startParam = getTelegramStartParam();
             const duelId = parseDuelIdFromStartParam(startParam);
+
             if (duelId) {
-                hasHandledDeepLink.current = true;
                 const targetPath = `/duel/${duelId}`;
                 if (pathname !== targetPath) {
-                    const hash = typeof window !== 'undefined' ? window.location.hash : '';
-                    router.replace(targetPath + hash);
+                    hasHandledDeepLink.current = true;
+                    try {
+                        router.replace(targetPath);
+                    } catch {
+                        window.location.replace(targetPath);
+                    }
+                } else {
+                    hasHandledDeepLink.current = true;
                 }
             }
-        }
+        };
+
+        // Check immediately
+        checkAndRoute();
+
+        // Check repeatedly for up to 3s to catch asynchronous Telegram Web SDK readiness
+        const intervalId = setInterval(checkAndRoute, 150);
+        const timeoutId = setTimeout(() => clearInterval(intervalId), 3000);
+
+        // Also check on hashchange or window focus if opened from chat link
+        window.addEventListener('hashchange', checkAndRoute);
+        window.addEventListener('focus', checkAndRoute);
+
+        return () => {
+            clearInterval(intervalId);
+            clearTimeout(timeoutId);
+            window.removeEventListener('hashchange', checkAndRoute);
+            window.removeEventListener('focus', checkAndRoute);
+        };
     }, [pathname, router]);
 
     // Multi-source wallet address resolution:

@@ -15,26 +15,45 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
     const hasHandledDeepLink = useRef(false);
 
     useEffect(() => {
-        // Strictly only execute if running inside Telegram Mini App
-        if (!isTelegramWebApp()) return;
+        // Expand viewport if in Telegram
+        if (isTelegramWebApp()) {
+            expandTelegramViewport();
+        }
 
-        // 1. Expand viewport to fullscreen
-        expandTelegramViewport();
-
-        // 2. Read startapp parameter and route directly to duel room
-        if (!hasHandledDeepLink.current) {
+        // Read startapp parameter and route directly to duel room
+        const checkAndRoute = () => {
+            if (hasHandledDeepLink.current) return;
             const startParam = getTelegramStartParam();
             const duelId = parseDuelIdFromStartParam(startParam);
 
             if (duelId) {
-                hasHandledDeepLink.current = true;
                 const targetPath = `/duel/${duelId}`;
                 if (pathname !== targetPath) {
-                    const hash = typeof window !== 'undefined' ? window.location.hash : '';
-                    router.replace(targetPath + hash);
+                    hasHandledDeepLink.current = true;
+                    try {
+                        router.replace(targetPath);
+                    } catch {
+                        window.location.replace(targetPath);
+                    }
+                } else {
+                    hasHandledDeepLink.current = true;
                 }
             }
-        }
+        };
+
+        checkAndRoute();
+        const intervalId = setInterval(checkAndRoute, 150);
+        const timeoutId = setTimeout(() => clearInterval(intervalId), 3000);
+
+        window.addEventListener('hashchange', checkAndRoute);
+        window.addEventListener('focus', checkAndRoute);
+
+        return () => {
+            clearInterval(intervalId);
+            clearTimeout(timeoutId);
+            window.removeEventListener('hashchange', checkAndRoute);
+            window.removeEventListener('focus', checkAndRoute);
+        };
     }, [pathname, router]);
 
     return <>{children}</>;
