@@ -197,33 +197,51 @@ export async function POST(req: Request) {
             transport: http(SHANNON_RPC),
         });
 
-        // Idempotency: For starter grant, check if wallet already has sufficient funds
-        if (claimType === 'starter') {
-            try {
-                const currentStt = await publicClient.getBalance({ address: checksumTarget });
-                const currentTusdc = await publicClient.readContract({
-                    address: USDSO_TOKEN,
-                    abi: erc20Abi,
-                    functionName: 'balanceOf',
-                    args: [checksumTarget],
-                });
+        // Pre-check user's current balances on Somnia Shannon
+        let currentStt = 0n;
+        let currentTusdc = 0n;
+        try {
+            currentStt = await publicClient.getBalance({ address: checksumTarget });
+            currentTusdc = await publicClient.readContract({
+                address: USDSO_TOKEN,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [checksumTarget],
+            });
+        } catch (balErr) {
+            console.warn('Balance pre-check notice:', balErr);
+        }
 
-                // If user already has >= 0.5 STT and >= 200 tUSDC, starter grant is already fulfilled
-                if (currentStt >= parseEther('0.5') && currentTusdc >= parseUnits('200', 6)) {
-                    return NextResponse.json({
-                        success: true,
-                        claimType,
-                        sttTx: null,
-                        tusdcTx: null,
-                        alreadyFunded: true,
-                        targetAddress: checksumTarget,
-                        telegramUserId: verifiedTelegramUserId,
-                        authMethod,
-                        message: 'Testnet grant already active (1 STT + 500 tUSDC ready)',
-                    });
-                }
-            } catch (balErr) {
-                console.warn('Balance pre-check notice:', balErr);
+        // Determine what needs to be funded based on claimType and existing balances
+        let shouldSendStt = false;
+        let shouldSendTusdc = false;
+
+        if (claimType === 'stt') {
+            shouldSendStt = true;
+        } else if (claimType === 'tusdc') {
+            shouldSendTusdc = true;
+        } else if (claimType === 'both') {
+            shouldSendStt = true;
+            shouldSendTusdc = true;
+        } else if (claimType === 'starter') {
+            // Only send STT if user has < 0.5 STT
+            shouldSendStt = currentStt < parseEther('0.5');
+            // Only send tUSDC if user has < 200 tUSDC
+            shouldSendTusdc = currentTusdc < parseUnits('200', 6);
+
+            // If neither is required, grant is already fulfilled
+            if (!shouldSendStt && !shouldSendTusdc) {
+                return NextResponse.json({
+                    success: true,
+                    claimType,
+                    sttTx: null,
+                    tusdcTx: null,
+                    alreadyFunded: true,
+                    targetAddress: checksumTarget,
+                    telegramUserId: verifiedTelegramUserId,
+                    authMethod,
+                    message: 'Testnet grant already active (1 STT + 500 tUSDC ready)',
+                });
             }
         }
 
@@ -237,23 +255,106 @@ export async function POST(req: Request) {
         let sttTx: string | null = null;
         let tusdcTx: string | null = null;
 
-        // Send 1 STT (gas) if claimType is starter, stt, or both
-        if (claimType === 'starter' || claimType === 'stt' || claimType === 'both') {
-            sttTx = await client.sendTransaction({
-                to: checksumTarget,
-                value: parseEther('1'),
-            });
+        // Fetch fresh pending nonce for the relayer
+        let currentNonce = await publicClient.getTransactionCount({
+            address: relayerAccount.address,
+            blockTag: 'pending',
+        });
+
+        // 1. Send STT (gas) if needed
+        if (shouldSendStt) {
+            try {
+                sttTx = await client.sendTransaction({
+                    to: checksumTarget,
+                    value: parseEther('1'),
+                    nonce: currentNonce,
+                });
+            } catch (err: any) {
+                const isNonceErr =
+                    err?.message?.includes('nonce') ||
+                    err?.shortMessage?.includes('nonce');
+                if (isNonceErr) {
+                    currentNonce = await publicClient.getTransactionCount({
+                        address: relayerAccount.address,
+                        blockTag: 'pending',
+                    });
+                    sttTx = await client.sendTransaction({
+                        to: checksumTarget,
+                        value: parseEther('1'),
+                        nonce: currentNonce,
+                    });
+                } else {
+                    throw err;
+                }
+            }
+
+            currentNonce++;
+
+            // Wait for STT confirmation so the nonce is committed on-chain
+            try {
+                await publicClient.waitForTransactionReceipt({
+                    hash: sttTx as `0x${string}`,
+                    timeout: 10_000,
+                });
+            } catch (waitErr) {
+                console.warn('STT receipt wait notice:', waitErr);
+            }
         }
 
-        // Send 500 tUSDC (collateral) if claimType is starter, tusdc, or both
-        if (claimType === 'starter' || claimType === 'tusdc' || claimType === 'both') {
-            tusdcTx = await client.writeContract({
-                address: USDSO_TOKEN,
-                abi: erc20Abi,
-                functionName: 'transfer',
-                args: [checksumTarget, parseUnits('500', 6)],
+        // 2. Send 500 tUSDC (collateral) if needed
+        if (shouldSendTusdc) {
+            // Re-sync nonce with pending pool to prevent collisions
+            const freshNonce = await publicClient.getTransactionCount({
+                address: relayerAccount.address,
+                blockTag: 'pending',
             });
+            const sendNonce = Math.max(currentNonce, freshNonce);
+
+            try {
+                tusdcTx = await client.writeContract({
+                    address: USDSO_TOKEN,
+                    abi: erc20Abi,
+                    functionName: 'transfer',
+                    args: [checksumTarget, parseUnits('500', 6)],
+                    nonce: sendNonce,
+                });
+            } catch (err: any) {
+                const isNonceErr =
+                    err?.message?.includes('nonce') ||
+                    err?.shortMessage?.includes('nonce');
+                if (isNonceErr) {
+                    const retryNonce = await publicClient.getTransactionCount({
+                        address: relayerAccount.address,
+                        blockTag: 'pending',
+                    });
+                    tusdcTx = await client.writeContract({
+                        address: USDSO_TOKEN,
+                        abi: erc20Abi,
+                        functionName: 'transfer',
+                        args: [checksumTarget, parseUnits('500', 6)],
+                        nonce: retryNonce,
+                    });
+                } else {
+                    throw err;
+                }
+            }
+
+            try {
+                await publicClient.waitForTransactionReceipt({
+                    hash: tusdcTx as `0x${string}`,
+                    timeout: 10_000,
+                });
+            } catch (waitErr) {
+                console.warn('tUSDC receipt wait notice:', waitErr);
+            }
         }
+
+        const grantedSummary = [
+            sttTx ? '1 STT' : null,
+            tusdcTx ? '500 tUSDC' : null,
+        ]
+            .filter(Boolean)
+            .join(' + ');
 
         return NextResponse.json({
             success: true,
@@ -263,13 +364,7 @@ export async function POST(req: Request) {
             targetAddress: checksumTarget,
             telegramUserId: verifiedTelegramUserId,
             authMethod,
-            message: `Granted testnet funds on Somnia Shannon (${
-                claimType === 'stt'
-                    ? '1 STT'
-                    : claimType === 'tusdc'
-                    ? '500 tUSDC'
-                    : '1 STT + 500 tUSDC'
-            })`,
+            message: `Granted testnet funds on Somnia Shannon (${grantedSummary || 'ready'})`,
         });
     } catch (err: any) {
         console.error('Telegram fund error:', err);
