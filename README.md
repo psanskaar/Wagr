@@ -36,22 +36,15 @@ Wagr settles duels automatically using Somnia's execution model:
 
 ```mermaid
 flowchart TD
-    subgraph Step1["1. Challenge & Escrow Lock"]
-        Alice["Alice (Creator)"] -->|"createDuel (UP, 25 tUSDC)"| Escrow["WagrEscrow Contract"]
-        Bob["Bob (Challenger)"] -->|"joinDuel (DOWN, 25 tUSDC)"| Escrow
-        Escrow -->|"Locks 50 tUSDC Pot"| Escrow
-    end
-
-    subgraph Step2["2. Market Window Closes"]
-        DreamDEX["DreamDEX Binary Market"] -->|"Emits Resolved(outcome = UP)"| Somnia["Somnia Reactivity Precompile<br/>(0x000...0100)"]
-    end
-
-    subgraph Step3["3. Same-Block Automated Settlement"]
-        Somnia -->|"Native onEvent() trigger"| Escrow
-        Escrow -->|"collateral.safeTransfer (49.50 tUSDC)"| Alice
-        Escrow -.->|"Fallback: /api/settle"| Relayer["Permissionless Relayer"]
-    end
+    Alice["Alice (Creator)"] -->|"1. createDuel (UP, 25 tUSDC)"| Escrow["WagrEscrow Contract"]
+    Bob["Bob (Challenger)"] -->|"2. joinDuel (DOWN, 25 tUSDC)"| Escrow
+    Escrow -->|"3. Locks 50 tUSDC Pot"| Market["DreamDEX Binary Market"]
+    Market -->|"4. Emits Resolved Event"| Somnia["Somnia Reactivity Precompile<br/>(0x000...0100)"]
+    Somnia -->|"5. Native onEvent() Call"| Settle["Zero-Click Payout Engine"]
+    Settle -->|"6. Transfers 49.50 tUSDC"| Winner["Winner's Wallet (Alice)"]
+    Settle -.->|"Fallback Redundancy"| Relayer["Permissionless Relayer (/api/settle)"]
 ```
+
 
 ---
 
@@ -62,21 +55,12 @@ Streamers and creators can monetize their audiences by embedding interactive pre
 
 ```mermaid
 flowchart TD
-    subgraph Phase1["1. Streamer Splitter Setup"]
-        Streamer["Streamer / Creator"] -->|"createSplitter(salt, recipients)"| Factory["WagrSplitterFactory"]
-        Factory -->|"Deploys immutable clone"| Splitter["WagrSplitter (CREATE2)"]
-    end
-
-    subgraph Phase2["2. Stream Viewer Wager"]
-        Streamer -->|"Embeds /widget/creator in stream/chat"| Viewer["Stream Viewers"]
-        Viewer -->|"createDuel with builder = Splitter"| Escrow["WagrEscrow Contract"]
-        Escrow -->|"Locks duel pot"| Escrow
-    end
-
-    subgraph Phase3["3. Revenue Routing & Claim"]
-        Escrow -->|"Pushes 1.00% fee upon settlement"| Splitter
-        Splitter -->|"Streamer calls claim() in Creator Studio"| Wallet["Creator Wallet"]
-    end
+    Streamer["Streamer / Creator"] -->|"1. createSplitter(handle, payoutAddr)"| Factory["WagrSplitterFactory"]
+    Factory -->|"2. Deploys Immutable Clone"| Splitter["WagrSplitter (CREATE2)"]
+    Viewer["Stream Viewers"] -->|"3. Place Wagers via /widget/creator"| Escrow["WagrEscrow Contract"]
+    Escrow -->|"4. Routes with builder = Splitter"| Splitter
+    Escrow -->|"5. Settlement triggers 1.00% fee"| Splitter
+    Splitter -->|"6. Streamer claims accrued fees"| Wallet["Creator Wallet"]
 ```
 
 ### Complete 5-Step Lifecycle:
