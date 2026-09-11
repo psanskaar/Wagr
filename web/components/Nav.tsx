@@ -141,20 +141,41 @@ export function Nav() {
                                         <span>Initializing session…</span>
                                     </div>
                                 ) : tgWallet.status === 'authenticating' ? (
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border/80 text-xs font-mono text-slate-300 select-none">
+                                    <button
+                                        onClick={() => {
+                                            sfx.tap();
+                                            tgWallet.retryLogin();
+                                        }}
+                                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface hover:bg-surface-hover border border-sky-500/40 text-xs font-mono text-slate-300 transition-colors"
+                                        title="Tap to connect Telegram"
+                                    >
                                         <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
-                                        <span>Authenticating…</span>
-                                    </div>
+                                        <span>Authenticating… (Tap)</span>
+                                    </button>
                                 ) : tgWallet.status === 'creating_wallet' ? (
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-brand/50 text-xs font-mono text-brand-light select-none">
+                                    <button
+                                        onClick={() => {
+                                            sfx.tap();
+                                            tgWallet.retryCreateWallet();
+                                        }}
+                                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface hover:bg-surface-hover border border-brand/50 text-xs font-mono text-brand-light transition-colors"
+                                        title="Tap to retry wallet creation"
+                                    >
                                         <span className="h-2 w-2 rounded-full bg-brand animate-ping" />
-                                        <span>Creating embedded wallet…</span>
-                                    </div>
+                                        <span>Creating wallet… (Tap)</span>
+                                    </button>
                                 ) : (
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs font-mono text-rose-300 select-none">
+                                    <button
+                                        onClick={() => {
+                                            sfx.tap();
+                                            tgWallet.retryLogin();
+                                        }}
+                                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/40 text-xs font-mono text-rose-300 transition-colors"
+                                        title="Tap to retry"
+                                    >
                                         <span className="h-2 w-2 rounded-full bg-rose-400" />
-                                        <span>Wallet error</span>
-                                    </div>
+                                        <span>Retry Connection</span>
+                                    </button>
                                 )
                             ) : (
                                 <button
