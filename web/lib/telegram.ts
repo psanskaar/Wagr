@@ -250,7 +250,39 @@ export function getTelegramStartParam(): string | null {
             }
         }
 
-        // 5. Check sessionStorage (cached by telegram-web-app.js as initParams)
+        // 5. Fallback: Direct regex search across search, hash, and referrer (handles single & double URL encoding)
+        const sourcesToScan = [
+            window.location.hash,
+            window.location.search,
+            typeof document !== 'undefined' ? document.referrer : '',
+        ];
+
+        for (const src of sourcesToScan) {
+            if (!src) continue;
+            try {
+                // Try raw match
+                let m = src.match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
+                if (!m) {
+                    // Try single decode
+                    m = decodeURIComponent(src).match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
+                }
+                if (!m) {
+                    // Try double decode
+                    try {
+                        m = decodeURIComponent(decodeURIComponent(src)).match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
+                    } catch {}
+                }
+                if (m && m[1]) {
+                    const clean = decodeURIComponent(m[1]).trim();
+                    if (clean) {
+                        try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
+                        return clean;
+                    }
+                }
+            } catch {}
+        }
+
+        // 6. Check sessionStorage (cached by telegram-web-app.js as initParams)
         try {
             const cachedParam = sessionStorage.getItem('wagr_tg_start_param');
             if (cachedParam) return cachedParam;

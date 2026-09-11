@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Nav } from '@/components/Nav';
 import { LiveCounter } from '@/components/LiveCounter';
@@ -24,12 +24,58 @@ import {
     SparklesIcon,
     CheckIcon,
 } from '@/components/Icons';
+import { getTelegramStartParam, parseDuelIdFromStartParam } from '@/lib/telegram';
 
 export default function HomePage() {
     const [demoSide, setDemoSide] = useState<'UP' | 'DOWN'>('UP');
     const [demoStake, setDemoStake] = useState('25');
     const { markets: activeMarkets, loading: marketsLoading } = useActiveMarkets();
     const topMarkets = activeMarkets.slice(0, 4);
+    const [incomingDuelId, setIncomingDuelId] = useState<string | null>(null);
+
+    useEffect(() => {
+        const checkStartParam = () => {
+            const startParam = getTelegramStartParam();
+            const duelId = parseDuelIdFromStartParam(startParam);
+            if (duelId) {
+                setIncomingDuelId(duelId);
+                const target = `/duel/${duelId}`;
+                if (typeof window !== 'undefined' && window.location.pathname !== target) {
+                    window.location.replace(target);
+                }
+            }
+        };
+
+        checkStartParam();
+        const interval = setInterval(checkStartParam, 150);
+        const timeout = setTimeout(() => clearInterval(interval), 3000);
+
+        window.addEventListener('hashchange', checkStartParam);
+        window.addEventListener('focus', checkStartParam);
+
+        return () => {
+            clearInterval(interval);
+            clearTimeout(timeout);
+            window.removeEventListener('hashchange', checkStartParam);
+            window.removeEventListener('focus', checkStartParam);
+        };
+    }, []);
+
+    if (incomingDuelId) {
+        return (
+            <div className="min-h-screen bg-bg text-slate-200 flex flex-col items-center justify-center p-6 text-center">
+                <div className="h-10 w-10 border-2 border-brand border-t-transparent rounded-full animate-spin mb-4" />
+                <h2 className="text-xl font-bold text-white mb-2">Joining Duel #{incomingDuelId}...</h2>
+                <p className="text-sm text-muted mb-6">Redirecting you to the live prediction room on Somnia Shannon.</p>
+                <a
+                    href={`/duel/${incomingDuelId}`}
+                    className="px-5 py-2.5 rounded-lg bg-brand hover:bg-brand-deep text-white text-sm font-semibold transition-colors shadow-sm"
+                >
+                    Click here to enter Duel #{incomingDuelId}
+                </a>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-bg text-slate-200">

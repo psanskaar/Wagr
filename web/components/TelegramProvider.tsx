@@ -32,8 +32,13 @@ export function TelegramProvider({ children }: { children: React.ReactNode }) {
                     hasHandledDeepLink.current = true;
                     try {
                         router.replace(targetPath);
-                    } catch {
-                        window.location.replace(targetPath);
+                    } catch {}
+                    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+                        setTimeout(() => {
+                            if (window.location.pathname !== targetPath) {
+                                window.location.replace(targetPath);
+                            }
+                        }, 100);
                     }
                 } else {
                     hasHandledDeepLink.current = true;
