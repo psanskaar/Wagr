@@ -145,7 +145,7 @@ Full test suite with unit tests, stateful invariant fuzzing, and formal Halmos s
 | **Invariant Campaigns** | Stateful Fuzzing | 2 campaigns (4,096 calls each; 128 runs at depth 32) verifying total escrow solvency |
 | **Total Test Suite** | `forge test` | 26 passed, 0 failed, 0 skipped across 5 suites |
 | **Halmos Symbolic** | `halmos` | 4 formal properties proving zero overpay, unresolved revert, void refund, and idempotency |
-| **Code Coverage** | `forge coverage` | source code coverage across core escrow functions |
+| **Code Coverage** | `forge coverage` | 100% source code coverage across core escrow functions |
 
 
 ---
