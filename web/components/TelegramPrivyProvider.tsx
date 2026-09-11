@@ -437,7 +437,7 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
 }
 
 export function TelegramPrivyProvider({ children }: { children: React.ReactNode }) {
-    const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'cmtwrniws038s0cl5cw6ulq8v';
+    const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || '';
 
     return (
         <PrivyProvider

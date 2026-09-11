@@ -138,16 +138,16 @@ export async function POST(req: Request) {
 
         const checksumTarget = getAddress(targetAddress);
 
-        const botToken = process.env.TELEGRAM_BOT_TOKEN || '8711843470:AAFmZqhkADJYWi90hBn0ghzLmvAAH84lFRw';
-        const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'cmtwrniws038s0cl5cw6ulq8v';
-        const privyAppSecret = process.env.PRIVY_APP_SECRET || 'privy_app_secret_3UzTAHJGYv7v4VJy7mMfKRNvzkDXRwNZJAi2TNXuyrkwsDz8mpW5D9m4RY1NWuCycYht2SPW8WdoKhEKaHKyfg8Y';
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+        const privyAppSecret = process.env.PRIVY_APP_SECRET;
 
         let isAuthVerified = false;
         let verifiedTelegramUserId: string | undefined;
         let authMethod = 'none';
 
         // Dual Verification Method 1: Telegram HMAC initData
-        if (initData && typeof initData === 'string' && initData.length > 10) {
+        if (initData && typeof initData === 'string' && initData.length > 10 && botToken) {
             const hmacResult = verifyTelegramInitData(initData, botToken);
             if (hmacResult.verified) {
                 isAuthVerified = true;
@@ -157,7 +157,7 @@ export async function POST(req: Request) {
         }
 
         // Dual Verification Method 2: Privy REST API verification
-        if (!isAuthVerified && privyUserId && typeof privyUserId === 'string' && privyUserId.startsWith('did:privy:')) {
+        if (!isAuthVerified && privyUserId && typeof privyUserId === 'string' && privyUserId.startsWith('did:privy:') && privyAppId && privyAppSecret) {
             const privyResult = await verifyPrivyTelegramUser(
                 privyUserId,
                 checksumTarget,
@@ -181,7 +181,7 @@ export async function POST(req: Request) {
             );
         }
 
-        let rawPk = process.env.KEEPER_PK || process.env.SETTLEMENT_RELAYER_PK || '0xaf0ead65a58886482f4a7749fffaf953c8b2cba5d621163fd765fdab1c3488f4';
+        let rawPk = process.env.KEEPER_PK || process.env.SETTLEMENT_RELAYER_PK;
         if (rawPk && !rawPk.startsWith('0x')) {
             rawPk = `0x${rawPk}`;
         }
