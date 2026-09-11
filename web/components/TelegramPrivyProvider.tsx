@@ -4,7 +4,6 @@ import React, { createContext, useContext, useEffect, useRef, useState, useMemo 
 import {
     PrivyProvider,
     usePrivy,
-    useLoginWithTelegram,
     useWallets,
     useCreateWallet,
     getEmbeddedConnectedWallet,
@@ -77,8 +76,7 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
 
     // Privy core authentication state
-    const { ready: privyReady, authenticated, user, exportWallet, getAccessToken } = usePrivy();
-    const { login: loginTelegram, state: telegramState } = useLoginWithTelegram();
+    const { ready: privyReady, authenticated, user, exportWallet, getAccessToken, login } = usePrivy();
 
     // Privy connected wallets list
     const { wallets, ready: walletsReady } = useWallets();
@@ -197,22 +195,12 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         };
     }, [privyReady, authenticated, confirmedAddress, actionError]);
 
-    // Handle Telegram auto-login if needed
+    // Allow Privy's native TMA seamless authentication to authenticate without conflicting popups
     useEffect(() => {
-        if (!privyReady || authenticated || hasAttemptedAutoLogin.current) return;
-
-        // If running inside Telegram Mini App, try Telegram login
-        const initData = getTelegramInitDataString();
-        console.log('[Privy TMA] Initializing login. InitData present:', !!initData);
-
-        if (telegramState.status === 'initial') {
-            hasAttemptedAutoLogin.current = true;
-            loginTelegram().catch((err: any) => {
-                console.warn('[Privy TMA] Auto-login notice:', err?.message || err);
-                // Don't mark as fatal error immediately to let user retry if needed
-            });
+        if (privyReady && !authenticated) {
+            console.log('[Privy TMA] Awaiting native seamless Telegram authentication...');
         }
-    }, [privyReady, authenticated, telegramState.status, loginTelegram]);
+    }, [privyReady, authenticated]);
 
     // Trigger wallet creation if authenticated but wallet does not exist yet
     useEffect(() => {
@@ -344,11 +332,14 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
 
     const retryLogin = () => {
         setActionError(null);
-        hasAttemptedAutoLogin.current = false;
-        loginTelegram().catch((err: any) => {
-            console.warn('[Privy TMA] Manual login error:', err);
-            setActionError(err?.message || 'Login attempt failed');
-        });
+        if (login) {
+            try {
+                login();
+            } catch (err: any) {
+                console.warn('[Privy TMA] Manual login error:', err);
+                setActionError(err?.message || 'Login attempt failed');
+            }
+        }
     };
 
     const retryCreateWallet = () => {
