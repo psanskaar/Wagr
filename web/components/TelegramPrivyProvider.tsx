@@ -1,8 +1,15 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { PrivyProvider, usePrivy, useLoginWithTelegram } from '@privy-io/react-auth';
-import { WagmiProvider, createConfig } from '@privy-io/wagmi';
+import React, { createContext, useContext, useEffect, useRef, useState, useMemo } from 'react';
+import {
+    PrivyProvider,
+    usePrivy,
+    useLoginWithTelegram,
+    useWallets,
+    useCreateWallet,
+    getEmbeddedConnectedWallet,
+} from '@privy-io/react-auth';
+import { WagmiProvider, createConfig, useSetActiveWallet } from '@privy-io/wagmi';
 import { http } from 'wagmi';
 import { somniaShannon, SHANNON_RPC } from '@/lib/wagr';
 import {
@@ -13,8 +20,18 @@ import {
 } from '@/lib/telegram';
 import { useRouter, usePathname } from 'next/navigation';
 
+export type TelegramWalletStatus =
+    | 'initializing'    // Phase 1: Privy SDK ready state is false
+    | 'authenticating'  // Authenticating Telegram user session
+    | 'creating_wallet' // Phase 2: Privy ready is true, but embedded wallet is creating / waiting to appear in wallets list
+    | 'ready'           // Phase 3: Both Privy ready AND embedded wallet confirmed in wallets list with address
+    | 'error';
+
 export interface TelegramWalletContextType {
     walletAddress?: string;
+    isReady: boolean;
+    status: TelegramWalletStatus;
+    statusLabel: string;
     isFunding: boolean;
     fundSuccess: string | null;
     fundError: string | null;
@@ -27,6 +44,9 @@ export interface TelegramWalletContextType {
 
 const TelegramWalletContext = createContext<TelegramWalletContextType>({
     walletAddress: undefined,
+    isReady: false,
+    status: 'initializing',
+    statusLabel: 'Initializing session…',
     isFunding: false,
     fundSuccess: null,
     fundError: null,
@@ -51,8 +71,15 @@ const privyWagmiConfig = createConfig({
 function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     const pathname = usePathname();
-    const { ready, authenticated, user, exportWallet } = usePrivy();
+
+    // Privy core authentication state
+    const { ready: privyReady, authenticated, exportWallet } = usePrivy();
     const { login: loginTelegram, state: telegramState } = useLoginWithTelegram();
+
+    // Privy connected wallets list
+    const { wallets, ready: walletsReady } = useWallets();
+    const { createWallet } = useCreateWallet();
+    const { setActiveWallet } = useSetActiveWallet();
 
     const [isFunding, setIsFunding] = useState(false);
     const [fundSuccess, setFundSuccess] = useState<string | null>(null);
@@ -60,6 +87,8 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
 
     const hasHandledDeepLink = useRef(false);
     const hasAttemptedStarterGrant = useRef(false);
+    const hasTriggeredLogin = useRef(false);
+    const isCreatingWallet = useRef(false);
 
     // Expand viewport to fullscreen on load
     useEffect(() => {
@@ -81,21 +110,102 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         }
     }, [pathname, router]);
 
-    // Auto-login with Telegram credentials inside Mini App
+    // Sequential Phase 1 -> Phase 2 -> Phase 3 evaluation
+    // Condition 1: Privy's ready state must be true
+    // Condition 2: Embedded wallet has finished being created and appears in wallets list
+    const { status, statusLabel, confirmedAddress, embeddedWallet } = useMemo(() => {
+        // Phase 1: Privy SDK still loading
+        if (!privyReady) {
+            return {
+                status: 'initializing' as TelegramWalletStatus,
+                statusLabel: 'Initializing session…',
+                confirmedAddress: undefined,
+                embeddedWallet: null,
+            };
+        }
+
+        // Authenticating Telegram identity
+        if (!authenticated) {
+            return {
+                status: 'authenticating' as TelegramWalletStatus,
+                statusLabel: 'Authenticating with Telegram…',
+                confirmedAddress: undefined,
+                embeddedWallet: null,
+            };
+        }
+
+        // Search for embedded wallet inside wallets list
+        const foundEmbedded =
+            getEmbeddedConnectedWallet(wallets) ||
+            wallets.find((w) => w.walletClientType === 'privy') ||
+            null;
+
+        // Phase 2: Authenticated, but embedded wallet is creating or hasn't appeared in wallets list
+        if (!foundEmbedded || !foundEmbedded.address) {
+            return {
+                status: 'creating_wallet' as TelegramWalletStatus,
+                statusLabel: 'Creating embedded wallet…',
+                confirmedAddress: undefined,
+                embeddedWallet: null,
+            };
+        }
+
+        // Phase 3: Both conditions confirmed!
+        return {
+            status: 'ready' as TelegramWalletStatus,
+            statusLabel: 'Connected',
+            confirmedAddress: foundEmbedded.address,
+            embeddedWallet: foundEmbedded,
+        };
+    }, [privyReady, authenticated, wallets]);
+
+    // Auto-login with Telegram when Privy is ready
     useEffect(() => {
-        if (!ready) return;
-        if (!authenticated && telegramState.status === 'initial') {
+        if (!privyReady) return;
+        if (!authenticated && !hasTriggeredLogin.current && telegramState.status === 'initial') {
+            hasTriggeredLogin.current = true;
             loginTelegram().catch((err: any) => {
                 console.warn('Privy Telegram auto-login error:', err);
+                hasTriggeredLogin.current = false;
             });
         }
-    }, [ready, authenticated, telegramState.status, loginTelegram]);
+    }, [privyReady, authenticated, telegramState.status, loginTelegram]);
 
-    const walletAddress = user?.wallet?.address;
+    // Ensure wallet creation is triggered if not yet present in wallets list
+    useEffect(() => {
+        if (
+            privyReady &&
+            authenticated &&
+            walletsReady &&
+            !embeddedWallet &&
+            !isCreatingWallet.current
+        ) {
+            isCreatingWallet.current = true;
+            createWallet()
+                .catch((err: any) => {
+                    // Safe to ignore if already being created automatically by Privy
+                    console.warn('Privy createWallet notice:', err?.message || err);
+                })
+                .finally(() => {
+                    isCreatingWallet.current = false;
+                });
+        }
+    }, [privyReady, authenticated, walletsReady, embeddedWallet, createWallet]);
 
-    // Faucet claim function
-    const requestFunds = async (claimType: 'starter' | 'stt' | 'tusdc' | 'both') => {
-        if (!walletAddress) return;
+    // Sync active wallet to Wagmi once Phase 3 is confirmed
+    useEffect(() => {
+        if (status === 'ready' && embeddedWallet) {
+            setActiveWallet(embeddedWallet).catch((err: any) => {
+                console.warn('Privy setActiveWallet notice:', err);
+            });
+        }
+    }, [status, embeddedWallet, setActiveWallet]);
+
+    // Faucet claim function: only called when confirmedAddress is valid
+    const requestFunds = async (claimType: 'starter' | 'stt' | 'tusdc' | 'both', target?: string) => {
+        const dest = target || confirmedAddress;
+        if (!dest) return;
+
         const initData = getTelegramInitDataString();
         if (!initData) {
             setFundError('Telegram session data missing. Cannot verify claim.');
@@ -110,7 +220,7 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     initData,
-                    targetAddress: walletAddress,
+                    targetAddress: dest,
                     claimType,
                 }),
             });
@@ -133,13 +243,13 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         }
     };
 
-    // Auto starter grant on initial wallet connection
+    // Auto starter grant: ONLY triggered after both conditions are confirmed
     useEffect(() => {
-        if (walletAddress && !hasAttemptedStarterGrant.current) {
+        if (status === 'ready' && confirmedAddress && !hasAttemptedStarterGrant.current) {
             hasAttemptedStarterGrant.current = true;
-            requestFunds('starter');
+            requestFunds('starter', confirmedAddress);
         }
-    }, [walletAddress]);
+    }, [status, confirmedAddress]);
 
     const refillStt = async () => {
         await requestFunds('stt');
@@ -154,9 +264,9 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
     };
 
     const exportKey = async () => {
-        if (!walletAddress) return;
+        if (!confirmedAddress) return;
         try {
-            await exportWallet({ address: walletAddress });
+            await exportWallet({ address: confirmedAddress });
         } catch (err: any) {
             console.warn('Export wallet canceled or failed:', err);
         }
@@ -167,10 +277,15 @@ function TelegramPrivyInner({ children }: { children: React.ReactNode }) {
         setFundError(null);
     };
 
+    const isReady = status === 'ready' && !!confirmedAddress;
+
     return (
         <TelegramWalletContext.Provider
             value={{
-                walletAddress,
+                walletAddress: isReady ? confirmedAddress : undefined,
+                isReady,
+                status,
+                statusLabel,
                 isFunding,
                 fundSuccess,
                 fundError,
@@ -245,7 +360,16 @@ export function TelegramPrivyProvider({ children }: { children: React.ReactNode 
                 supportedChains: [somniaShannon],
             }}
         >
-            <WagmiProvider config={privyWagmiConfig}>
+            <WagmiProvider
+                config={privyWagmiConfig}
+                setActiveWalletForWagmi={({ wallets }) => {
+                    return (
+                        getEmbeddedConnectedWallet(wallets) ||
+                        wallets.find((w) => w.walletClientType === 'privy') ||
+                        wallets[0]
+                    );
+                }}
+            >
                 <TelegramPrivyInner>{children}</TelegramPrivyInner>
             </WagmiProvider>
         </PrivyProvider>

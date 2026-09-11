@@ -23,10 +23,13 @@ export function Nav() {
     }, []);
 
     const tgWallet = useTelegramWallet();
+    const activeAddress = (isTelegram ? (tgWallet.isReady ? tgWallet.walletAddress : undefined) : address) as `0x${string}` | undefined;
+    const isWalletConnected = isTelegram ? tgWallet.isReady : isConnected;
+
     const { data: sttBalanceData, refetch: refetchStt } = useBalance({
-        address,
+        address: activeAddress,
         query: {
-            enabled: isTelegram && !!address,
+            enabled: !!activeAddress,
             refetchInterval: 5_000,
         },
     });
@@ -36,9 +39,9 @@ export function Nav() {
         address: USDSO_TOKEN,
         abi: erc20Abi,
         functionName: 'balanceOf',
-        args: address ? [address] : undefined,
+        args: activeAddress ? [activeAddress] : undefined,
         query: {
-            enabled: !!address,
+            enabled: !!activeAddress,
             refetchInterval: 5_000,
         },
     });
@@ -118,7 +121,7 @@ export function Nav() {
                     </Link>
 
                     {/* USDso Balance if connected */}
-                    {isConnected && balanceData !== undefined && (
+                    {isWalletConnected && balanceData !== undefined && (
                         <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface border border-border text-xs whitespace-nowrap">
                             <span className="text-muted text-[11px]">USDso:</span>
                             <span className="font-mono font-medium text-emerald-400">
@@ -130,24 +133,49 @@ export function Nav() {
                     {/* Wallet Display: Telegram Embedded Wallet in Telegram, RainbowKit Connect Button in Browsers */}
                     {isTelegram ? (
                         <div className="relative">
-                            <button
-                                onClick={() => {
-                                    sfx.tap();
-                                    setWalletModalOpen(!walletModalOpen);
-                                }}
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border hover:border-brand/60 text-xs font-mono transition-all shadow-sm"
-                            >
-                                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                                <span className="text-white font-bold">{address ? shortAddr(address) : 'Connecting…'}</span>
-                                {balanceData !== undefined && (
-                                    <span className="hidden sm:inline text-emerald-400 font-sans font-medium text-[11px]">
-                                        {fmtUsd(balanceData as bigint)}
-                                    </span>
-                                )}
-                            </button>
+                            {!tgWallet.isReady || !tgWallet.walletAddress ? (
+                                /* Explicit separate loading indicators for initialization and wallet creation phases */
+                                tgWallet.status === 'initializing' ? (
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border/80 text-xs font-mono text-muted select-none">
+                                        <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                                        <span>Initializing session…</span>
+                                    </div>
+                                ) : tgWallet.status === 'authenticating' ? (
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border/80 text-xs font-mono text-slate-300 select-none">
+                                        <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+                                        <span>Authenticating…</span>
+                                    </div>
+                                ) : tgWallet.status === 'creating_wallet' ? (
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-brand/50 text-xs font-mono text-brand-light select-none">
+                                        <span className="h-2 w-2 rounded-full bg-brand animate-ping" />
+                                        <span>Creating embedded wallet…</span>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs font-mono text-rose-300 select-none">
+                                        <span className="h-2 w-2 rounded-full bg-rose-400" />
+                                        <span>Wallet error</span>
+                                    </div>
+                                )
+                            ) : (
+                                <button
+                                    onClick={() => {
+                                        sfx.tap();
+                                        setWalletModalOpen(!walletModalOpen);
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border hover:border-brand/60 text-xs font-mono transition-all shadow-sm"
+                                >
+                                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                                    <span className="text-white font-bold">{shortAddr(tgWallet.walletAddress)}</span>
+                                    {balanceData !== undefined && (
+                                        <span className="hidden sm:inline text-emerald-400 font-sans font-medium text-[11px]">
+                                            {fmtUsd(balanceData as bigint)}
+                                        </span>
+                                    )}
+                                </button>
+                            )}
 
-                            {/* Telegram Wallet Flyout Panel */}
-                            {walletModalOpen && (
+                            {/* Telegram Wallet Flyout Panel (strictly only mounted when ready) */}
+                            {walletModalOpen && tgWallet.isReady && tgWallet.walletAddress && (
                                 <>
                                     <div
                                         className="fixed inset-0 z-40"
@@ -170,13 +198,13 @@ export function Nav() {
                                         <div className="space-y-1">
                                             <span className="text-[10px] text-muted uppercase tracking-wider font-semibold">Address</span>
                                             <div className="flex items-center justify-between p-2 rounded-xl bg-surface border border-border text-xs font-mono text-slate-300">
-                                                <span>{address ? shortAddr(address) : 'Loading…'}</span>
+                                                <span>{shortAddr(tgWallet.walletAddress)}</span>
                                                 <div className="flex items-center gap-1">
                                                     <button
                                                         onClick={() => {
                                                             sfx.tap();
-                                                            if (address) {
-                                                                navigator.clipboard.writeText(address);
+                                                            if (tgWallet.walletAddress) {
+                                                                navigator.clipboard.writeText(tgWallet.walletAddress);
                                                                 setCopiedAddr(true);
                                                                 setTimeout(() => setCopiedAddr(false), 2000);
                                                             }
