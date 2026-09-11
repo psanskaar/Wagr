@@ -35,26 +35,22 @@ Wagr settles duels automatically using Somnia's execution model:
 - **Relayer Fallback**: The Next.js backend endpoint `/api/settle` monitors resolution state and provides redundant settlement triggers so users never have to manually claim.
 
 ```mermaid
-sequenceDiagram
-    participant Alice as Alice (Creator)
-    participant Bob as Bob (Challenger)
-    participant Escrow as WagrEscrow
-    participant DreamDEX as DreamDEX Market
-    participant Somnia as Somnia Reactivity Precompile
-    
-    Alice->>Escrow: createDuel(market, side=UP, stake=25 USDso)
-    Escrow-->>Alice: Duel #17 Created (Pot: 25 USDso)
-    Alice->>Bob: Shares deep link (Web or Telegram)
-    Bob->>Escrow: joinDuel(duelId=17, side=DOWN, stake=25 USDso)
-    Escrow-->>Bob: Duel Matched (Pot: 50 USDso locked)
-    
-    Note over DreamDEX: Expiry window ends & oracle resolves
-    DreamDEX->>Somnia: Emits Resolved(outcome=UP)
-    Somnia->>Escrow: onEvent(Resolved, marketAddress)
-    Note over Escrow: Evaluates Alice winner
-    Escrow->>Alice: collateral.safeTransfer(Alice, 49.50 USDso)
-    Escrow->>Escrow: Emits DuelSettled(id=17, winner=Alice, payout=49.50 USDso)
-    Note over Alice: Funds appear directly in wallet. Zero clicks required!
+flowchart TD
+    subgraph Step1["1. Challenge & Escrow Lock"]
+        Alice["Alice (Creator)"] -->|"createDuel (UP, 25 tUSDC)"| Escrow["WagrEscrow Contract"]
+        Bob["Bob (Challenger)"] -->|"joinDuel (DOWN, 25 tUSDC)"| Escrow
+        Escrow -->|"Locks 50 tUSDC Pot"| Escrow
+    end
+
+    subgraph Step2["2. Market Window Closes"]
+        DreamDEX["DreamDEX Binary Market"] -->|"Emits Resolved(outcome = UP)"| Somnia["Somnia Reactivity Precompile<br/>(0x000...0100)"]
+    end
+
+    subgraph Step3["3. Same-Block Automated Settlement"]
+        Somnia -->|"Native onEvent() trigger"| Escrow
+        Escrow -->|"collateral.safeTransfer (49.50 tUSDC)"| Alice
+        Escrow -.->|"Fallback: /api/settle"| Relayer["Permissionless Relayer"]
+    end
 ```
 
 ---
@@ -63,26 +59,24 @@ sequenceDiagram
 
 Streamers and creators can monetize their audiences by embedding interactive prediction widgets into Twitch, Kick, YouTube livestreams, or linktrees:
 
+
 ```mermaid
-sequenceDiagram
-    participant Streamer
-    participant Factory as WagrSplitterFactory
-    participant Viewer as Viewer (Stream Chat)
-    participant Escrow as WagrEscrow
-    participant Splitter as WagrSplitter (CREATE2)
+flowchart TD
+    subgraph Phase1["1. Streamer Splitter Setup"]
+        Streamer["Streamer / Creator"] -->|"createSplitter(salt, recipients)"| Factory["WagrSplitterFactory"]
+        Factory -->|"Deploys immutable clone"| Splitter["WagrSplitter (CREATE2)"]
+    end
 
-    Note over Streamer,Factory: Prerequisite: Streamer Registration
-    Streamer->>Factory: createSplitter(salt=keccak256("streamer"), recipients=[(streamer, 10000)])
-    Factory-->>Streamer: Deploys immutable CREATE2 WagrSplitter clone
+    subgraph Phase2["2. Stream Viewer Wager"]
+        Streamer -->|"Embeds /widget/creator in stream/chat"| Viewer["Stream Viewers"]
+        Viewer -->|"createDuel with builder = Splitter"| Escrow["WagrEscrow Contract"]
+        Escrow -->|"Locks duel pot"| Escrow
+    end
 
-    Note over Viewer,Escrow: Viewer Wager Flow
-    Streamer->>Viewer: Embeds /widget/streamer in stream or chat
-    Viewer->>Escrow: createDuel(market, side, stake, builder=Splitter, builderBps=100)
-    Note over Escrow: Duel pot locked. Viewer shares duel link in live chat.
-    
-    Note over Escrow,Splitter: Resolution & Fee Routing
-    Escrow->>Splitter: Pushes 1.00% builder fee upon Reactivity settlement
-    Streamer->>Splitter: Calls claim() via Creator Studio to withdraw earnings
+    subgraph Phase3["3. Revenue Routing & Claim"]
+        Escrow -->|"Pushes 1.00% fee upon settlement"| Splitter
+        Splitter -->|"Streamer calls claim() in Creator Studio"| Wallet["Creator Wallet"]
+    end
 ```
 
 ### Complete 5-Step Lifecycle:
