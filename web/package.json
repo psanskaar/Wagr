@@ -9,9 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.42.0",
+    "@privy-io/wagmi": "^4.0.17",
     "@rainbow-me/rainbowkit": "^2.1.5",
     "@somnia-chain/markets-sdk": "^0.28.0",
     "@tanstack/react-query": "^5.55.0",
+    "@telegram-apps/sdk-react": "^3.3.9",
     "framer-motion": "^11.5.0",
     "next": "14.2.7",
     "react": "^18.3.1",

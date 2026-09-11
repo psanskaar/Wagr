@@ -35,7 +35,9 @@ import {
     TrophyIcon,
     LockIcon,
     ClockIcon,
+    SendIcon,
 } from '@/components/Icons';
+import { isTelegramWebApp, shareTelegramDuel, telegramHaptic } from '@/lib/telegram';
 
 interface DuelState {
     alice: Address;
@@ -73,7 +75,12 @@ export default function DuelRoomPage({ params }: { params: { id: string } }) {
     const [isCancelling, setIsCancelling] = useState(false);
     const [isSettling, setIsSettling] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [isTelegram, setIsTelegram] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+    useEffect(() => {
+        setIsTelegram(isTelegramWebApp());
+    }, []);
 
     // Celebration & Outcome Modal
     const [celebrate, setCelebrate] = useState(false);
@@ -322,6 +329,11 @@ export default function DuelRoomPage({ params }: { params: { id: string } }) {
 
     const copyShareLink = () => {
         sfx.tap();
+        if (isTelegram) {
+            telegramHaptic('impact');
+            shareTelegramDuel(duelId, `Fight me in Wagr Duel #${duelId}!`);
+            return;
+        }
         if (typeof window !== 'undefined') {
             navigator.clipboard.writeText(window.location.href);
             setCopied(true);
@@ -413,8 +425,22 @@ export default function DuelRoomPage({ params }: { params: { id: string } }) {
                                 onClick={copyShareLink}
                                 className="flex items-center gap-1.5 rounded-lg border border-border bg-surface hover:bg-surface-hover px-3 py-1.5 text-xs font-medium text-white transition-colors"
                             >
-                                {copied ? <CheckIcon className="w-3.5 h-3.5 text-emerald-400" /> : <CopyIcon className="w-3.5 h-3.5" />}
-                                <span>{copied ? 'Copied Link!' : 'Share Challenge Link'}</span>
+                                {isTelegram ? (
+                                    <>
+                                        <SendIcon className="w-3.5 h-3.5 text-sky-400" />
+                                        <span>Share via Telegram</span>
+                                    </>
+                                ) : copied ? (
+                                    <>
+                                        <CheckIcon className="w-3.5 h-3.5 text-emerald-400" />
+                                        <span>Copied Link!</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <CopyIcon className="w-3.5 h-3.5" />
+                                        <span>Share Challenge Link</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>

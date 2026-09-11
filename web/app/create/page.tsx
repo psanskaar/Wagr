@@ -35,7 +35,14 @@ import {
     ExternalLinkIcon,
     ShieldCheckIcon,
     CoinsIcon,
+    SendIcon,
 } from '@/components/Icons';
+import {
+    isTelegramWebApp,
+    shareTelegramDuel,
+    getTelegramDuelDeepLink,
+    telegramHaptic,
+} from '@/lib/telegram';
 
 function CreateDuelInner() {
     const router = useRouter();
@@ -87,7 +94,12 @@ function CreateDuelInner() {
     const [txHash, setTxHash] = useState<string | null>(null);
     const [createdDuelId, setCreatedDuelId] = useState<string | null>(null);
     const [copiedLink, setCopiedLink] = useState(false);
+    const [isTelegram, setIsTelegram] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    useEffect(() => {
+        setIsTelegram(isTelegramWebApp());
+    }, []);
 
     // Live User USDso Balance
     const { data: userBalance } = useReadContract({
@@ -503,12 +515,23 @@ function CreateDuelInner() {
                                 <div className="flex items-center gap-2">
                                     <input
                                         readOnly
-                                        value={typeof window !== 'undefined' ? `${window.location.origin}/duel/${createdDuelId || '1'}` : `/duel/${createdDuelId || '1'}`}
+                                        value={
+                                            isTelegram
+                                                ? getTelegramDuelDeepLink(createdDuelId || '1')
+                                                : typeof window !== 'undefined'
+                                                ? `${window.location.origin}/duel/${createdDuelId || '1'}`
+                                                : `/duel/${createdDuelId || '1'}`
+                                        }
                                         className="w-full rounded-xl bg-bg border border-border px-3.5 py-2 font-mono text-xs text-brand-light"
                                     />
                                     <button
                                         onClick={() => {
                                             sfx.tap();
+                                            if (isTelegram) {
+                                                telegramHaptic('impact');
+                                                shareTelegramDuel(createdDuelId || '1');
+                                                return;
+                                            }
                                             const link = typeof window !== 'undefined'
                                                 ? `${window.location.origin}/duel/${createdDuelId || '1'}`
                                                 : `/duel/${createdDuelId || '1'}`;
@@ -516,9 +539,18 @@ function CreateDuelInner() {
                                             setCopiedLink(true);
                                             setTimeout(() => setCopiedLink(false), 2000);
                                         }}
-                                        className="rounded-xl border border-border bg-surface px-4 py-2 text-xs font-semibold text-white hover:bg-surface-hover"
+                                        className="rounded-xl border border-border bg-surface px-4 py-2 text-xs font-semibold text-white hover:bg-surface-hover flex items-center gap-1.5 shrink-0"
                                     >
-                                        {copiedLink ? 'Copied!' : 'Copy'}
+                                        {isTelegram ? (
+                                            <>
+                                                <SendIcon className="w-3.5 h-3.5 text-sky-400" />
+                                                <span>Share</span>
+                                            </>
+                                        ) : copiedLink ? (
+                                            'Copied!'
+                                        ) : (
+                                            'Copy'
+                                        )}
                                     </button>
                                 </div>
                                 <div className="flex gap-3 pt-2">

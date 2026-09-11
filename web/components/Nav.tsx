@@ -1,16 +1,35 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useReadContract } from 'wagmi';
-import { USDSO_TOKEN, erc20Abi, fmtUsd, sfx } from '@/lib/wagr';
+import { useAccount, useReadContract, useBalance } from 'wagmi';
+import { USDSO_TOKEN, erc20Abi, fmtUsd, shortAddr, sfx } from '@/lib/wagr';
+import { isTelegramWebApp } from '@/lib/telegram';
+import { useTelegramWallet } from './TelegramPrivyProvider';
+import { SparklesIcon, CheckIcon, CopyIcon } from './Icons';
 
 export function Nav() {
     const pathname = usePathname();
     const { address, isConnected } = useAccount();
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [isTelegram, setIsTelegram] = useState(false);
+    const [walletModalOpen, setWalletModalOpen] = useState(false);
+    const [copiedAddr, setCopiedAddr] = useState(false);
+
+    useEffect(() => {
+        setIsTelegram(isTelegramWebApp());
+    }, []);
+
+    const tgWallet = useTelegramWallet();
+    const { data: sttBalanceData, refetch: refetchStt } = useBalance({
+        address,
+        query: {
+            enabled: isTelegram && !!address,
+            refetchInterval: 5_000,
+        },
+    });
 
     // Live USDso Token Balance
     const { data: balanceData } = useReadContract({
@@ -108,12 +127,147 @@ export function Nav() {
                         </div>
                     )}
 
-                    {/* RainbowKit Connect Button - Compact Avatar */}
-                    <ConnectButton
-                        chainStatus="none"
-                        showBalance={false}
-                        accountStatus="avatar"
-                    />
+                    {/* Wallet Display: Telegram Embedded Wallet in Telegram, RainbowKit Connect Button in Browsers */}
+                    {isTelegram ? (
+                        <div className="relative">
+                            <button
+                                onClick={() => {
+                                    sfx.tap();
+                                    setWalletModalOpen(!walletModalOpen);
+                                }}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-surface border border-border hover:border-brand/60 text-xs font-mono transition-all shadow-sm"
+                            >
+                                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="text-white font-bold">{address ? shortAddr(address) : 'Connecting…'}</span>
+                                {balanceData !== undefined && (
+                                    <span className="hidden sm:inline text-emerald-400 font-sans font-medium text-[11px]">
+                                        {fmtUsd(balanceData as bigint)}
+                                    </span>
+                                )}
+                            </button>
+
+                            {/* Telegram Wallet Flyout Panel */}
+                            {walletModalOpen && (
+                                <>
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setWalletModalOpen(false)}
+                                    />
+                                    <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-bg/95 border border-border p-4 shadow-2xl backdrop-blur-xl z-50 space-y-4 animate-in zoom-in-95 duration-200">
+                                        <div className="flex items-center justify-between pb-2 border-b border-border">
+                                            <div className="flex items-center gap-1.5">
+                                                <SparklesIcon className="w-4 h-4 text-brand-light" />
+                                                <span className="text-xs font-bold text-white">Telegram Embedded Wallet</span>
+                                            </div>
+                                            <button
+                                                onClick={() => setWalletModalOpen(false)}
+                                                className="text-muted hover:text-white text-xs p-1"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <span className="text-[10px] text-muted uppercase tracking-wider font-semibold">Address</span>
+                                            <div className="flex items-center justify-between p-2 rounded-xl bg-surface border border-border text-xs font-mono text-slate-300">
+                                                <span>{address ? shortAddr(address) : 'Loading…'}</span>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        onClick={() => {
+                                                            sfx.tap();
+                                                            if (address) {
+                                                                navigator.clipboard.writeText(address);
+                                                                setCopiedAddr(true);
+                                                                setTimeout(() => setCopiedAddr(false), 2000);
+                                                            }
+                                                        }}
+                                                        className="p-1 rounded hover:bg-white/10 text-muted hover:text-white"
+                                                        title="Copy Address"
+                                                    >
+                                                        {copiedAddr ? <CheckIcon className="w-3.5 h-3.5 text-emerald-400" /> : <CopyIcon className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Balances */}
+                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                            <div className="p-2.5 rounded-xl bg-surface border border-border">
+                                                <span className="text-muted text-[11px] block">STT Gas</span>
+                                                <span className="font-mono font-bold text-white">
+                                                    {sttBalanceData ? Number(sttBalanceData.formatted).toFixed(2) : '0.00'}
+                                                </span>
+                                            </div>
+                                            <div className="p-2.5 rounded-xl bg-surface border border-border">
+                                                <span className="text-muted text-[11px] block">USDso Collateral</span>
+                                                <span className="font-mono font-bold text-emerald-400">
+                                                    {balanceData !== undefined ? fmtUsd(balanceData as bigint) : '0.00'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Refill Buttons */}
+                                        <div className="space-y-1.5 pt-1">
+                                            <span className="text-[10px] text-muted uppercase tracking-wider font-semibold">Testnet Faucet Refills</span>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <button
+                                                    disabled={tgWallet.isFunding}
+                                                    onClick={async () => {
+                                                        sfx.tap();
+                                                        await tgWallet.refillStt();
+                                                        refetchStt();
+                                                    }}
+                                                    className="w-full py-2 px-2 rounded-xl bg-surface hover:bg-surface-hover border border-border text-[11px] font-bold text-white transition-colors disabled:opacity-50"
+                                                >
+                                                    {tgWallet.isFunding ? 'Refilling…' : '+ 1 STT (Gas)'}
+                                                </button>
+                                                <button
+                                                    disabled={tgWallet.isFunding}
+                                                    onClick={async () => {
+                                                        sfx.tap();
+                                                        await tgWallet.refillTusdc();
+                                                    }}
+                                                    className="w-full py-2 px-2 rounded-xl bg-surface hover:bg-surface-hover border border-border text-[11px] font-bold text-emerald-400 transition-colors disabled:opacity-50"
+                                                >
+                                                    {tgWallet.isFunding ? 'Refilling…' : '+ 500 tUSDC'}
+                                                </button>
+                                            </div>
+                                            <button
+                                                disabled={tgWallet.isFunding}
+                                                onClick={async () => {
+                                                    sfx.tap();
+                                                    await tgWallet.refillBoth();
+                                                    refetchStt();
+                                                }}
+                                                className="w-full py-2 rounded-xl bg-gradient-to-r from-brand to-teal-400 text-[11px] font-bold text-black transition-all hover:opacity-95 disabled:opacity-50"
+                                            >
+                                                {tgWallet.isFunding ? 'Refilling Both…' : 'Refill Both (1 STT + 500 tUSDC)'}
+                                            </button>
+                                        </div>
+
+                                        {/* Non-custodial Key Export */}
+                                        <div className="pt-2 border-t border-border">
+                                            <button
+                                                onClick={() => {
+                                                    sfx.tap();
+                                                    tgWallet.exportKey();
+                                                }}
+                                                className="w-full py-2 rounded-xl border border-border/80 bg-surface hover:bg-surface-hover text-[11px] font-medium text-slate-300 transition-colors flex items-center justify-center gap-1.5"
+                                            >
+                                                <span>Export Private Key</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    ) : (
+                        <ConnectButton
+                            chainStatus="none"
+                            showBalance={false}
+                            accountStatus="avatar"
+                        />
+                    )}
 
                     {/* Mobile Hamburger Toggle */}
                     <button

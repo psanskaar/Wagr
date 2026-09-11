@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
     getDefaultConfig,
     RainbowKitProvider,
@@ -10,6 +10,9 @@ import '@rainbow-me/rainbowkit/styles.css';
 import { WagmiProvider, http } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { somniaShannon, SHANNON_RPC } from '@/lib/wagr';
+import { isTelegramWebApp } from '@/lib/telegram';
+import { TelegramPrivyProvider } from './TelegramPrivyProvider';
+import { TelegramProvider } from './TelegramProvider';
 
 const wagmiConfig = getDefaultConfig({
     appName: 'Wagr | DreamDEX Prediction Layer',
@@ -22,6 +25,12 @@ const wagmiConfig = getDefaultConfig({
 });
 
 export function Providers({ children }: { children: React.ReactNode }) {
+    const [isTelegram, setIsTelegram] = useState(false);
+
+    useEffect(() => {
+        setIsTelegram(isTelegramWebApp());
+    }, []);
+
     const queryClient = useMemo(
         () =>
             new QueryClient({
@@ -35,6 +44,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
         []
     );
 
+    // If inside Telegram Mini App, activate Privy's embedded MPC wallet setup
+    if (isTelegram) {
+        return (
+            <QueryClientProvider client={queryClient}>
+                <TelegramPrivyProvider>{children}</TelegramPrivyProvider>
+            </QueryClientProvider>
+        );
+    }
+
+    // Standard browser: 100% untouched RainbowKit & Wagmi configuration
     return (
         <WagmiProvider config={wagmiConfig}>
             <QueryClientProvider client={queryClient}>
@@ -47,7 +66,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
                         overlayBlur: 'small',
                     })}
                 >
-                    {children}
+                    <TelegramProvider>{children}</TelegramProvider>
                 </RainbowKitProvider>
             </QueryClientProvider>
         </WagmiProvider>

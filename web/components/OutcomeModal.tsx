@@ -13,7 +13,9 @@ import {
     CopyIcon,
     ArrowRightIcon,
     CoinsIcon,
+    SendIcon,
 } from './Icons';
+import { isTelegramWebApp, shareTelegramDuel, telegramHaptic } from '@/lib/telegram';
 
 export interface OutcomeModalProps {
     isOpen: boolean;
@@ -48,17 +50,25 @@ export function OutcomeModal({
 }: OutcomeModalProps) {
     const [copied, setCopied] = useState(false);
     const [counter, setCounter] = useState(0);
+    const [isTelegram, setIsTelegram] = useState(false);
+
+    useEffect(() => {
+        setIsTelegram(isTelegramWebApp());
+    }, []);
 
     useEffect(() => {
         if (!isOpen) return;
 
-        // Sound effect based on user role
+        // Sound effect and Telegram haptics based on user role
+        const isTg = isTelegramWebApp();
         if (isWinner) {
             sfx.bigWin();
+            if (isTg) telegramHaptic('success');
         } else if (isSpectator) {
             sfx.tap();
         } else {
             sfx.lose();
+            if (isTg) telegramHaptic('error');
         }
 
         // Ticker count-up animation for winning payout or spectator pot
@@ -91,6 +101,16 @@ export function OutcomeModal({
 
     const handleShare = () => {
         sfx.tap();
+        if (isTelegram) {
+            telegramHaptic('impact');
+            const tgShareText = isWinner
+                ? `🏆 Just won ${fmtUsd(payout)} USDso in a 1-v-1 prediction duel on Wagr! Direct push payout, zero manual claim vouchers required. Who wants next?`
+                : isSpectator
+                ? `⚡ Duel #${duelId} on Wagr just settled! Winner: ${shortAddr(resolvedWinner)} took home ${fmtUsd(payout)} USDso. Check it out!`
+                : `💀 Just got clipped in duel #${duelId} on Wagr. Running it back immediately!`;
+            shareTelegramDuel(duelId, tgShareText);
+            return;
+        }
         if (typeof window !== 'undefined') {
             const text = isWinner
                 ? `🏆 Just won ${fmtUsd(payout)} USDso in a 1-v-1 prediction duel on @WagrApp! Direct push payout, zero manual claim vouchers required. Who wants next? ${window.location.origin}/duel/${duelId}`
@@ -305,7 +325,12 @@ export function OutcomeModal({
                                     onClick={handleShare}
                                     className="w-full py-3 rounded-2xl border border-border bg-surface hover:bg-surface-hover text-xs font-bold text-white transition-colors flex items-center justify-center gap-2"
                                 >
-                                    {copied ? (
+                                    {isTelegram ? (
+                                        <>
+                                            <SendIcon className="w-4 h-4 text-sky-400" />
+                                            <span>Share Win via Telegram</span>
+                                        </>
+                                    ) : copied ? (
                                         <>
                                             <CheckIcon className="w-4 h-4 text-emerald-400" />
                                             <span>Brag Link Copied to Clipboard!</span>
@@ -336,7 +361,12 @@ export function OutcomeModal({
                                     onClick={handleShare}
                                     className="w-full py-3 rounded-2xl border border-border bg-surface hover:bg-surface-hover text-xs font-bold text-white transition-colors flex items-center justify-center gap-2"
                                 >
-                                    {copied ? (
+                                    {isTelegram ? (
+                                        <>
+                                            <SendIcon className="w-4 h-4 text-sky-400" />
+                                            <span>Share Result via Telegram</span>
+                                        </>
+                                    ) : copied ? (
                                         <>
                                             <CheckIcon className="w-4 h-4 text-cyan-400" />
                                             <span>Duel Link Copied to Clipboard!</span>

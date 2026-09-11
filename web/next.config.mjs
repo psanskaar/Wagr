@@ -8,9 +8,14 @@ const nextConfig = {
             '@x402/svm/exact/client': false,
             '@x402/evm': false,
             '@react-native-async-storage/async-storage': false,
+            '@farcaster/mini-app-solana': false,
             fs: false,
             net: false,
             tls: false,
+        };
+        config.resolve.alias = {
+            ...config.resolve.alias,
+            '@farcaster/mini-app-solana': false,
         };
         config.externals.push('pino-pretty', 'lokijs', 'encoding');
         return config;
