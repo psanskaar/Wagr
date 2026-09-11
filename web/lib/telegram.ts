@@ -159,62 +159,107 @@ export function expandTelegramViewport(): void {
 }
 
 /**
+ * Checks if a start parameter or duel ID has already been fulfilled in the current session.
+ */
+export function isStartParamConsumed(paramOrDuelId: string | null): boolean {
+    if (!paramOrDuelId || typeof window === 'undefined') return false;
+    try {
+        const clean = paramOrDuelId.trim();
+        const duelId = parseDuelIdFromStartParam(clean);
+        if (sessionStorage.getItem(`wagr_consumed_${clean}`) === 'true') return true;
+        if (duelId && sessionStorage.getItem(`wagr_consumed_${duelId}`) === 'true') return true;
+    } catch {}
+    return false;
+}
+
+/**
+ * Marks a start parameter or duel ID as consumed and strips the hash to prevent
+ * infinite redirect loops when navigating back to the homepage.
+ */
+export function markTelegramStartParamConsumed(paramOrDuelId?: string | null): void {
+    if (typeof window === 'undefined') return;
+    try {
+        sessionStorage.removeItem('wagr_tg_start_param');
+        let target = paramOrDuelId;
+        if (!target) {
+            const tg = (window as any).Telegram?.WebApp;
+            target = tg?.initDataUnsafe?.start_param;
+        }
+        if (target) {
+            const clean = target.trim();
+            sessionStorage.setItem(`wagr_consumed_${clean}`, 'true');
+            const duelId = parseDuelIdFromStartParam(clean);
+            if (duelId) {
+                sessionStorage.setItem(`wagr_consumed_${duelId}`, 'true');
+                sessionStorage.setItem(`wagr_consumed_duel_${duelId}`, 'true');
+            }
+        }
+        // Remove hash from window location without refreshing so tgWebAppData is not re-read
+        if (
+            window.location.hash &&
+            (window.location.hash.includes('start_param') ||
+                window.location.hash.includes('startapp') ||
+                window.location.hash.includes('tgWebAppData'))
+        ) {
+            const cleanUrl = window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', cleanUrl);
+        }
+    } catch {}
+}
+
+/**
  * Retrieves the startapp deep link parameter passed by Telegram.
  * E.g. t.me/WagrDuelBot/app?startapp=duel_16 -> returns "duel_16"
  * Supports Telegram Web, Mobile, Desktop, and direct URL query/hash parameters.
+ * Automatically ignores parameters that have already been consumed in this session.
  */
 export function getTelegramStartParam(): string | null {
     if (typeof window === 'undefined') return null;
+
+    const validate = (candidate: string | null | undefined): string | null => {
+        if (!candidate) return null;
+        const clean = candidate.trim();
+        if (!clean) return null;
+        if (isStartParamConsumed(clean)) return null;
+        return clean;
+    };
 
     try {
         const tg = (window as any).Telegram?.WebApp;
 
         // 1. Check window.Telegram.WebApp.initDataUnsafe.start_param
-        const tgParam = tg?.initDataUnsafe?.start_param;
-        if (tgParam) {
-            const p = String(tgParam).trim();
-            if (p) {
-                try { sessionStorage.setItem('wagr_tg_start_param', p); } catch {}
-                return p;
-            }
-        }
+        const tgParam = validate(tg?.initDataUnsafe?.start_param);
+        if (tgParam) return tgParam;
 
         // 2. Check window.Telegram.WebApp.initData string directly
         if (tg?.initData) {
             try {
                 const initDataParams = new URLSearchParams(tg.initData);
-                const p = initDataParams.get('start_param') || initDataParams.get('startapp');
-                if (p) {
-                    const clean = p.trim();
-                    try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                    return clean;
-                }
+                const p = validate(initDataParams.get('start_param') || initDataParams.get('startapp'));
+                if (p) return p;
             } catch {}
         }
 
         // 3. Check query parameters (both top-level and nested in tgWebAppData)
         if (window.location.search) {
             const urlParams = new URLSearchParams(window.location.search);
-            const queryParam =
+            const queryParam = validate(
                 urlParams.get('tgWebAppStartParam') ||
                 urlParams.get('startapp') ||
-                urlParams.get('start_param');
-            if (queryParam) {
-                const clean = queryParam.trim();
-                try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                return clean;
-            }
+                urlParams.get('start_param')
+            );
+            if (queryParam) return queryParam;
 
             const urlWebAppData = urlParams.get('tgWebAppData');
             if (urlWebAppData) {
                 try {
                     const innerParams = new URLSearchParams(urlWebAppData);
-                    const p = innerParams.get('start_param') || innerParams.get('startapp') || innerParams.get('tgWebAppStartParam');
-                    if (p) {
-                        const clean = p.trim();
-                        try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                        return clean;
-                    }
+                    const p = validate(
+                        innerParams.get('start_param') ||
+                        innerParams.get('startapp') ||
+                        innerParams.get('tgWebAppStartParam')
+                    );
+                    if (p) return p;
                 } catch {}
             }
         }
@@ -225,27 +270,34 @@ export function getTelegramStartParam(): string | null {
                 ? window.location.hash.slice(1)
                 : window.location.hash;
             const hashParams = new URLSearchParams(hashStr);
-            const hashParam =
+            const hashParam = validate(
                 hashParams.get('tgWebAppStartParam') ||
                 hashParams.get('startapp') ||
-                hashParams.get('start_param');
-            if (hashParam) {
-                const clean = hashParam.trim();
-                try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                return clean;
-            }
+                hashParams.get('start_param')
+            );
+            if (hashParam) return hashParam;
 
             // Telegram Web encodes all parameters inside tgWebAppData in the URL hash
             const hashWebAppData = hashParams.get('tgWebAppData');
             if (hashWebAppData) {
                 try {
                     const innerHashParams = new URLSearchParams(hashWebAppData);
-                    const p = innerHashParams.get('start_param') || innerHashParams.get('startapp') || innerHashParams.get('tgWebAppStartParam');
-                    if (p) {
-                        const clean = p.trim();
-                        try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                        return clean;
+                    let p = validate(
+                        innerHashParams.get('start_param') ||
+                        innerHashParams.get('startapp') ||
+                        innerHashParams.get('tgWebAppStartParam')
+                    );
+                    if (!p) {
+                        try {
+                            const decodedInner = new URLSearchParams(decodeURIComponent(hashWebAppData));
+                            p = validate(
+                                decodedInner.get('start_param') ||
+                                decodedInner.get('startapp') ||
+                                decodedInner.get('tgWebAppStartParam')
+                            );
+                        } catch {}
                     }
+                    if (p) return p;
                 } catch {}
             }
         }
@@ -260,43 +312,33 @@ export function getTelegramStartParam(): string | null {
         for (const src of sourcesToScan) {
             if (!src) continue;
             try {
-                // Try raw match
                 let m = src.match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
                 if (!m) {
-                    // Try single decode
                     m = decodeURIComponent(src).match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
                 }
                 if (!m) {
-                    // Try double decode
                     try {
                         m = decodeURIComponent(decodeURIComponent(src)).match(/(?:start_param|startapp|tgWebAppStartParam)=([^&;]+)/i);
                     } catch {}
                 }
                 if (m && m[1]) {
-                    const clean = decodeURIComponent(m[1]).trim();
-                    if (clean) {
-                        try { sessionStorage.setItem('wagr_tg_start_param', clean); } catch {}
-                        return clean;
-                    }
+                    const clean = validate(decodeURIComponent(m[1]));
+                    if (clean) return clean;
                 }
             } catch {}
         }
 
         // 6. Check sessionStorage (cached by telegram-web-app.js as initParams)
         try {
-            const cachedParam = sessionStorage.getItem('wagr_tg_start_param');
-            if (cachedParam) return cachedParam;
-
             const rawInitParams = sessionStorage.getItem('initParams');
             if (rawInitParams) {
                 const parsed = JSON.parse(rawInitParams);
-                if (parsed?.tgWebAppStartParam) return String(parsed.tgWebAppStartParam).trim();
-                if (parsed?.start_param) return String(parsed.start_param).trim();
-                if (parsed?.startapp) return String(parsed.startapp).trim();
+                const sp = validate(parsed?.tgWebAppStartParam || parsed?.start_param || parsed?.startapp);
+                if (sp) return sp;
                 if (parsed?.tgWebAppData) {
                     const inner = new URLSearchParams(parsed.tgWebAppData);
-                    const p = inner.get('start_param') || inner.get('startapp') || inner.get('tgWebAppStartParam');
-                    if (p) return p.trim();
+                    const p = validate(inner.get('start_param') || inner.get('startapp') || inner.get('tgWebAppStartParam'));
+                    if (p) return p;
                 }
             }
         } catch {}

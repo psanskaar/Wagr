@@ -37,7 +37,12 @@ import {
     ClockIcon,
     SendIcon,
 } from '@/components/Icons';
-import { isTelegramWebApp, shareTelegramDuel, telegramHaptic } from '@/lib/telegram';
+import {
+    isTelegramWebApp,
+    shareTelegramDuel,
+    telegramHaptic,
+    markTelegramStartParamConsumed,
+} from '@/lib/telegram';
 
 interface DuelState {
     alice: Address;
@@ -80,7 +85,8 @@ export default function DuelRoomPage({ params }: { params: { id: string } }) {
 
     useEffect(() => {
         setIsTelegram(isTelegramWebApp());
-    }, []);
+        markTelegramStartParamConsumed(params.id);
+    }, [params.id]);
 
     // Celebration & Outcome Modal
     const [celebrate, setCelebrate] = useState(false);

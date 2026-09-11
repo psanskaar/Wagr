@@ -24,7 +24,12 @@ import {
     SparklesIcon,
     CheckIcon,
 } from '@/components/Icons';
-import { getTelegramStartParam, parseDuelIdFromStartParam } from '@/lib/telegram';
+import {
+    getTelegramStartParam,
+    parseDuelIdFromStartParam,
+    isStartParamConsumed,
+    markTelegramStartParamConsumed,
+} from '@/lib/telegram';
 
 export default function HomePage() {
     const [demoSide, setDemoSide] = useState<'UP' | 'DOWN'>('UP');
@@ -37,7 +42,8 @@ export default function HomePage() {
         const checkStartParam = () => {
             const startParam = getTelegramStartParam();
             const duelId = parseDuelIdFromStartParam(startParam);
-            if (duelId) {
+            if (duelId && !isStartParamConsumed(duelId)) {
+                markTelegramStartParamConsumed(duelId);
                 setIncomingDuelId(duelId);
                 const target = `/duel/${duelId}`;
                 if (typeof window !== 'undefined' && window.location.pathname !== target) {
@@ -48,7 +54,7 @@ export default function HomePage() {
 
         checkStartParam();
         const interval = setInterval(checkStartParam, 150);
-        const timeout = setTimeout(() => clearInterval(interval), 3000);
+        const timeout = setTimeout(() => clearInterval(interval), 1500);
 
         window.addEventListener('hashchange', checkStartParam);
         window.addEventListener('focus', checkStartParam);
@@ -101,7 +107,7 @@ export default function HomePage() {
 
                         {/* Plain English explanation */}
                         <p className="text-base sm:text-lg text-muted max-w-2xl mx-auto leading-relaxed">
-                            Turn any DreamDEX event contract into a shareable 1-v-1 duel. When the price window closes, payout triggers automatically in the background — the winner receives their funds directly with zero claim buttons.
+                            Turn any DreamDEX event contract into a shareable 1-v-1 duel. When the price window closes, payout triggers automatically in the background - the winner receives their funds directly with zero claim buttons.
                         </p>
 
                         {/* Action buttons */}

@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useReadContract, useBalance } from 'wagmi';
 import { USDSO_TOKEN, erc20Abi, fmtUsd, shortAddr, sfx } from '@/lib/wagr';
-import { isTelegramWebApp } from '@/lib/telegram';
+import { isTelegramWebApp, markTelegramStartParamConsumed } from '@/lib/telegram';
 import { useTelegramWallet } from './TelegramPrivyProvider';
 import { SparklesIcon, CheckIcon, CopyIcon } from './Icons';
 
@@ -60,7 +60,10 @@ export function Nav() {
                 <div className="flex items-center gap-8">
                     <Link
                         href="/"
-                        onClick={() => sfx.tap()}
+                        onClick={() => {
+                            sfx.tap();
+                            markTelegramStartParamConsumed();
+                        }}
                         className="flex items-center gap-2.5 transition-opacity hover:opacity-90"
                     >
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white font-bold text-sm shadow-sm">
